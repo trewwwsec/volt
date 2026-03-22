@@ -313,6 +313,12 @@ def build_gcp_bucket_wordlist(
     return candidates
 
 
+def build_gcp_xml_api_endpoint(bucket: str, virtual_hosted: bool = False) -> str:
+    if virtual_hosted:
+        return f"https://{bucket}.storage.googleapis.com"
+    return f"https://storage.googleapis.com/{bucket}"
+
+
 def parse_azure_error_code(headers: dict[str, str], body: str) -> str:
     for key, value in headers.items():
         if key.lower() == "x-ms-error-code" and value.strip():
@@ -705,12 +711,15 @@ def classify_gcp_status(status: int, error_code: str = "") -> str:
 def probe_gcp_list_access(
     bucket: str,
     timeout: int,
+    virtual_hosted: bool = False,
     *,
     fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
     parse_gcp_error_code: Callable[[str], str],
     cloud_probe_http_retries: int,
 ) -> tuple[int, str]:
-    url = f"https://storage.googleapis.com/{bucket}/"
+    url = (
+        f"{build_gcp_xml_api_endpoint(bucket, virtual_hosted)}/?list-type=2&max-keys=1"
+    )
     status, body, _ = fetch_url(
         url, timeout=timeout, method="GET", retries=cloud_probe_http_retries
     )
@@ -720,13 +729,14 @@ def probe_gcp_list_access(
 def probe_gcp_object_access(
     bucket: str,
     timeout: int,
+    virtual_hosted: bool = False,
     *,
     fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
     parse_gcp_error_code: Callable[[str], str],
     cloud_probe_http_retries: int,
 ) -> tuple[int, str]:
     probe_key = f"__subrecon_probe__{time_ns()}"
-    url = f"https://storage.googleapis.com/{bucket}/{probe_key}"
+    url = f"{build_gcp_xml_api_endpoint(bucket, virtual_hosted)}/{probe_key}"
     status, body, _ = fetch_url(
         url, timeout=timeout, method="GET", retries=cloud_probe_http_retries
     )
@@ -736,31 +746,53 @@ def probe_gcp_object_access(
 def check_single_gcp_bucket_exists(
     bucket: str,
     timeout: int,
+    gcp_dual_endpoint_probe: bool = False,
     *,
     fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
     classify_gcp_status: Callable[[int, str], str],
-    probe_gcp_list_access: Callable[[str, int], tuple[int, str]],
-    probe_gcp_object_access: Callable[[str, int], tuple[int, str]],
+    probe_gcp_list_access: Callable[[str, int, bool], tuple[int, str]],
+    probe_gcp_object_access: Callable[[str, int, bool], tuple[int, str]],
     parse_gcp_error_code: Callable[[str], str],
     cloud_probe_http_retries: int,
 ) -> tuple[str, Optional[int], str, Optional[int]]:
-    url = f"https://storage.googleapis.com/{bucket}/"
-    status, body, _ = fetch_url(
-        url, timeout=timeout, method="HEAD", retries=cloud_probe_http_retries
-    )
-    existence = classify_gcp_status(status, parse_gcp_error_code(body))
-    list_status: Optional[int] = None
+    def evaluate_endpoint(virtual_hosted: bool) -> tuple[int, str, Optional[int]]:
+        url = f"{build_gcp_xml_api_endpoint(bucket, virtual_hosted)}/"
+        status, body, _ = fetch_url(
+            url, timeout=timeout, method="HEAD", retries=cloud_probe_http_retries
+        )
+        existence = classify_gcp_status(status, parse_gcp_error_code(body))
+        list_status: Optional[int] = None
 
-    if existence == "unknown":
-        list_status, list_error_code = probe_gcp_list_access(bucket, timeout)
-        list_existence = classify_gcp_status(list_status, list_error_code)
-        if list_existence != "unknown":
-            existence = list_existence
-    if existence == "unknown":
-        object_status, object_error_code = probe_gcp_object_access(bucket, timeout)
-        object_existence = classify_gcp_status(object_status, object_error_code)
-        if object_existence != "unknown":
-            existence = object_existence
+        if existence == "unknown":
+            list_status, list_error_code = probe_gcp_list_access(
+                bucket, timeout, virtual_hosted
+            )
+            list_existence = classify_gcp_status(list_status, list_error_code)
+            if list_existence != "unknown":
+                existence = list_existence
+
+        if existence == "unknown":
+            object_status, object_error_code = probe_gcp_object_access(
+                bucket, timeout, virtual_hosted
+            )
+            object_existence = classify_gcp_status(object_status, object_error_code)
+            if object_existence != "unknown":
+                existence = object_existence
+
+        return status, existence, list_status
+
+    status, existence, list_status = evaluate_endpoint(False)
+
+    # Optional fallback for endpoint behavior mismatches.
+    if gcp_dual_endpoint_probe and "." not in bucket and existence == "unknown":
+        fallback_status, fallback_existence, fallback_list_status = evaluate_endpoint(
+            True
+        )
+        if fallback_existence != "unknown":
+            status = fallback_status
+            existence = fallback_existence
+            if fallback_list_status is not None or list_status is None:
+                list_status = fallback_list_status
 
     return bucket, status, existence, list_status
 
@@ -772,7 +804,7 @@ def collect_gcp_bucket_findings(
     *,
     build_gcp_bucket_wordlist: Callable[[ScanContext, set[str]], set[str]],
     check_single_gcp_bucket_exists: Callable[
-        [str, int], tuple[str, Optional[int], str, Optional[int]]
+        [str, int, bool], tuple[str, Optional[int], str, Optional[int]]
     ],
     validate_gcp_bucket_name: Callable[[str], tuple[bool, str]],
     log: Callable[[str, bool, bool], None],
@@ -818,7 +850,12 @@ def collect_gcp_bucket_findings(
     ambiguous = 0
     with ThreadPoolExecutor(max_workers=context.threads) as pool:
         futures = {
-            pool.submit(check_single_gcp_bucket_exists, bucket, context.timeout): bucket
+            pool.submit(
+                check_single_gcp_bucket_exists,
+                bucket,
+                context.timeout,
+                context.gcp_dual_endpoint_probe,
+            ): bucket
             for bucket in candidates
         }
         for fut in as_completed(futures):

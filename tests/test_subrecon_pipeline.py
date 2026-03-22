@@ -733,7 +733,9 @@ class SubreconPipelineTest(unittest.TestCase):
     def test_collect_gcp_bucket_findings_classifies_200_as_medium(
         self, mock_gcp_check
     ) -> None:
-        def fake_check(bucket: str, timeout: int):
+        def fake_check(
+            bucket: str, timeout: int, gcp_dual_endpoint_probe: bool = False
+        ):
             if bucket == "mybucket":
                 return bucket, 200, "confirmed_exists", None
             if bucket == "example":
@@ -806,6 +808,30 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertIn(
             "gcp-public-data-landsat/__subrecon_probe__",
             mock_fetch_url.call_args_list[2].args[0],
+        )
+
+    @patch("subrecon.fetch_url")
+    def test_check_single_gcp_bucket_exists_uses_dual_endpoint_fallback(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.side_effect = [
+            (404, "", {}),
+            (404, "<Error><Code>NotFound</Code></Error>", {}),
+            (404, "<Error><Code>NotFound</Code></Error>", {}),
+            (403, "", {}),
+        ]
+        _, status, existence, list_status = subrecon.check_single_gcp_bucket_exists(
+            "examplebucket",
+            5,
+            gcp_dual_endpoint_probe=True,
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(existence, "likely_exists")
+        self.assertEqual(list_status, 404)
+        self.assertEqual(mock_fetch_url.call_count, 4)
+        self.assertIn(
+            "https://examplebucket.storage.googleapis.com/",
+            mock_fetch_url.call_args_list[3].args[0],
         )
 
     @patch("builtins.print")
@@ -1291,8 +1317,11 @@ class SubreconPipelineTest(unittest.TestCase):
         parser = subrecon.build_parser()
         args = parser.parse_args(["-d", "example.com"])
         self.assertFalse(args.no_gcp)
+        self.assertFalse(args.gcp_dual_endpoint_probe)
         args = parser.parse_args(["-d", "example.com", "--no-gcp"])
         self.assertTrue(args.no_gcp)
+        args = parser.parse_args(["-d", "example.com", "--gcp-dual-endpoint-probe"])
+        self.assertTrue(args.gcp_dual_endpoint_probe)
 
     def test_build_parser_azure_default_and_disable_flag(self) -> None:
         parser = subrecon.build_parser()

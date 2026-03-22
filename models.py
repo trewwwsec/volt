@@ -35,3 +35,4 @@ class ScanContext:
     s3_list_probe: bool = True
     s3_website_probe: bool = False
     s3_probe_retries: int = 0
+    gcp_dual_endpoint_probe: bool = False

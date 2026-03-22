@@ -155,6 +155,14 @@ def build_parser(*, positive_int: Callable[[str], int]) -> argparse.ArgumentPars
             "(0=default conservative, 1=single retry with backoff)"
         ),
     )
+    parser.add_argument(
+        "--gcp-dual-endpoint-probe",
+        action="store_true",
+        help=(
+            "Enable optional GCS fallback probing on virtual-hosted XML endpoint "
+            "(<bucket>.storage.googleapis.com) when path-style probing is ambiguous"
+        ),
+    )
 
     parser.add_argument(
         "--no-ct", action="store_true", help="Disable CT log collection"
@@ -237,6 +245,7 @@ def run_scan(
         s3_list_probe=args.s3_list_probe,
         s3_website_probe=getattr(args, "s3_website_probe", False),
         s3_probe_retries=getattr(args, "s3_probe_retries", 0),
+        gcp_dual_endpoint_probe=getattr(args, "gcp_dual_endpoint_probe", False),
     )
 
     print(f"[*] Passive scan started for {len(domains)} domain(s)")
@@ -323,7 +332,13 @@ def run_scan(
         print(f"    [s3] matching bucket names: {len(s3_findings)}")
 
     if not args.no_gcp:
-        print("[*] Checking candidate GCP bucket names (HEAD + list probe)...")
+        if getattr(args, "gcp_dual_endpoint_probe", False):
+            print(
+                "[*] Checking candidate GCP bucket names "
+                "(HEAD + list probe + optional dual endpoint)..."
+            )
+        else:
+            print("[*] Checking candidate GCP bucket names (HEAD + list probe)...")
         gcp_findings = collect_gcp_bucket_findings(
             context, discovered_hosts, source_health["gcp"]
         )
@@ -371,6 +386,11 @@ def run_scan(
         legal_notes.append(
             "S3 website probing uses anonymous HTTP requests against "
             "region-scoped website endpoints (no object retrieval)."
+        )
+    if getattr(args, "gcp_dual_endpoint_probe", False):
+        legal_notes.append(
+            "GCP dual-endpoint probing may add optional virtual-hosted XML endpoint "
+            "checks when path-style responses are ambiguous."
         )
 
     return {

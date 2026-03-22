@@ -74,6 +74,11 @@ AZURE_BLOB_WEB_CNAME_SUFFIXES = (
     "web.core.cloudapi.de",
 )
 AZURE_BLOB_DNS_ZONE_CNAME_SUFFIXES = ("blob.storage.azure.net",)
+AZURE_BLOB_SYSTEM_CONTAINERS = (
+    "$web",
+    "$root",
+    "$logs",
+)
 AZURE_BLOB_LIKELY_EXISTS_ERROR_CODES = {
     "AuthorizationFailure",
     "AuthenticationFailed",

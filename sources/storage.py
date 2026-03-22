@@ -5,6 +5,7 @@ from ipaddress import ip_address
 import re
 from time import time_ns
 from typing import Any, Callable, Optional
+from urllib.parse import quote
 
 from core import record_source_error
 from models import Evidence, Finding, ScanContext
@@ -94,6 +95,8 @@ def sanitize_azure_container_label(value: str) -> str:
 
 
 def is_valid_azure_container_name(value: str) -> bool:
+    if value in {"$web", "$root", "$logs"}:
+        return True
     if not (3 <= len(value) <= 63):
         return False
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]*[a-z0-9]", value):
@@ -1043,8 +1046,9 @@ def check_single_azure_blob_container(
     azure_blob_api_version: str,
     cloud_probe_http_retries: int,
 ) -> tuple[str, str, int, str, str, str]:
+    encoded_container = quote(container, safe="")
     url = (
-        f"https://{account}.blob.core.windows.net/{container}"
+        f"https://{account}.blob.core.windows.net/{encoded_container}"
         "?restype=container&comp=list&maxresults=1"
     )
     status, body, headers = fetch_url(
@@ -1076,6 +1080,7 @@ def collect_azure_blob_findings(
         [str, str, int], tuple[str, str, int, str, str, str]
     ],
     azure_blob_reference_url: str,
+    azure_blob_system_containers: tuple[str, ...],
 ) -> list[Finding]:
     findings: list[Finding] = []
     if not hosts:
@@ -1134,13 +1139,28 @@ def collect_azure_blob_findings(
             stats["notes"].append("no azure blob storage CNAME targets found")
         return findings
 
-    container_candidates = sorted(build_azure_container_wordlist(context, hosts))
+    regular_container_candidates = sorted(
+        build_azure_container_wordlist(context, hosts)
+    )
+    container_candidates: list[str] = []
+    seen_candidates: set[str] = set()
+    for container in azure_blob_system_containers:
+        if container in seen_candidates:
+            continue
+        container_candidates.append(container)
+        seen_candidates.add(container)
+    for container in regular_container_candidates:
+        if container in seen_candidates:
+            continue
+        container_candidates.append(container)
+        seen_candidates.add(container)
     if not container_candidates:
         stats["status"] = "ok_no_candidates"
         return findings
 
     stats["storage_accounts"] = len(account_to_hosts)
     stats["container_candidates"] = len(container_candidates)
+    stats["system_container_candidates"] = len(azure_blob_system_containers)
 
     probe_targets: list[tuple[str, str]] = []
     for account in sorted(account_to_hosts):
@@ -1158,6 +1178,8 @@ def collect_azure_blob_findings(
     stats["queried"] = stats["doh_queries"] + stats["probes"]
 
     likely_exists = 0
+    system_container_hits = 0
+    system_container_set = set(azure_blob_system_containers)
     with ThreadPoolExecutor(max_workers=context.threads) as pool:
         futures = {
             pool.submit(
@@ -1194,6 +1216,8 @@ def collect_azure_blob_findings(
 
             if existence != "confirmed_public":
                 continue
+            if container in system_container_set:
+                system_container_hits += 1
 
             linked_hosts = sorted(account_to_hosts.get(account, set()))
             source_hosts = ", ".join(linked_hosts[:5]) if linked_hosts else "unknown"
@@ -1236,6 +1260,7 @@ def collect_azure_blob_findings(
             )
 
     stats["likely_exists"] = likely_exists
+    stats["system_container_hits"] = system_container_hits
     stats["hosts"] = len(findings)
     stats["findings"] = len(findings)
     if stats["errors"]:

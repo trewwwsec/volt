@@ -631,6 +631,11 @@ class SubreconPipelineTest(unittest.TestCase):
             "unknown",
         )
 
+    def test_is_valid_azure_container_name_accepts_system_containers(self) -> None:
+        self.assertTrue(subrecon.is_valid_azure_container_name("$web"))
+        self.assertTrue(subrecon.is_valid_azure_container_name("$root"))
+        self.assertTrue(subrecon.is_valid_azure_container_name("$logs"))
+
     def test_parse_azure_error_code_prefers_header(self) -> None:
         code = subrecon.parse_azure_error_code(
             {"x-ms-error-code": "AuthorizationFailure"},
@@ -998,6 +1003,49 @@ class SubreconPipelineTest(unittest.TestCase):
 
     @patch("subrecon.check_single_azure_blob_container")
     @patch("subrecon.fetch_doh_cname_records")
+    def test_collect_azure_blob_findings_includes_system_containers(
+        self, mock_fetch_doh, mock_check_azure
+    ) -> None:
+        mock_fetch_doh.return_value = (
+            200,
+            ["acmestorage.blob.core.windows.net"],
+            "https://dns.google/resolve?name=app.example.com&type=CNAME",
+        )
+
+        def fake_check(account: str, container: str, timeout: int):
+            if account == "acmestorage" and container == "$web":
+                return (
+                    account,
+                    container,
+                    200,
+                    "confirmed_public",
+                    "",
+                    "https://example",
+                )
+            return (
+                account,
+                container,
+                404,
+                "unknown",
+                "ContainerNotFound",
+                "https://example",
+            )
+
+        mock_check_azure.side_effect = fake_check
+        ctx = self._default_context()
+        ctx.domains = []
+        ctx.organization = ""
+        ctx.keywords = []
+        ctx.max_bucket_candidates = 20
+        health = subrecon.init_source_health("azure")
+        findings = subrecon.collect_azure_blob_findings(
+            ctx, {"app.example.com"}, health
+        )
+        self.assertTrue(any(f.asset == "acmestorage/$web" for f in findings))
+        self.assertGreater(health.get("system_container_hits", 0), 0)
+
+    @patch("subrecon.check_single_azure_blob_container")
+    @patch("subrecon.fetch_doh_cname_records")
     def test_collect_azure_blob_findings_infers_account_from_host_without_cname(
         self, mock_fetch_doh, mock_check_azure
     ) -> None:
@@ -1194,6 +1242,21 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(
             mock_fetch_url.call_args.kwargs.get("retries"),
             subrecon.CLOUD_PROBE_HTTP_RETRIES,
+        )
+
+    @patch("subrecon.fetch_url")
+    def test_check_single_azure_blob_container_encodes_system_container_name(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.return_value = (200, "", {})
+        subrecon.check_single_azure_blob_container(
+            "azureopendatastorage",
+            "$web",
+            5,
+        )
+        self.assertIn(
+            "/%24web?restype=container&comp=list&maxresults=1",
+            mock_fetch_url.call_args.args[0],
         )
 
     @patch("subrecon.fetch_url")

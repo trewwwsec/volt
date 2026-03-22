@@ -34,6 +34,7 @@ from constants import (
     AZURE_BLOB_DNS_ZONE_CNAME_SUFFIXES,
     AZURE_BLOB_LIKELY_EXISTS_ERROR_CODES,
     AZURE_BLOB_REFERENCE_URL,
+    AZURE_BLOB_SYSTEM_CONTAINERS,
     AZURE_BLOB_WEB_CNAME_SUFFIXES,
     CT_HTTP_RETRIES,
     CLOUD_PROBE_HTTP_RETRIES,
@@ -700,6 +701,7 @@ def collect_azure_blob_findings(
         build_azure_container_wordlist=build_azure_container_wordlist,
         check_single_azure_blob_container=check_single_azure_blob_container,
         azure_blob_reference_url=AZURE_BLOB_REFERENCE_URL,
+        azure_blob_system_containers=AZURE_BLOB_SYSTEM_CONTAINERS,
     )
 
 

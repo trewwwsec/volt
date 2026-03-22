@@ -1055,17 +1055,37 @@ def check_single_azure_blob_container(
     cloud_probe_http_retries: int,
 ) -> tuple[str, str, int, str, str, str]:
     encoded_container = quote(container, safe="")
-    url = (
-        f"https://{account}.blob.core.windows.net/{encoded_container}"
-        "?restype=container&comp=list&maxresults=1"
+    container_url = (
+        f"https://{account}.blob.core.windows.net/{encoded_container}?restype=container"
     )
     status, body, headers = fetch_url(
-        url, timeout=timeout, method="GET", retries=cloud_probe_http_retries
+        container_url, timeout=timeout, method="HEAD", retries=cloud_probe_http_retries
     )
     error_code = parse_azure_error_code(headers, body)
     if error_code == "FeatureVersionMismatch":
         status, body, headers = fetch_url(
-            url,
+            container_url,
+            timeout=timeout,
+            method="HEAD",
+            headers={"x-ms-version": azure_blob_api_version},
+            retries=cloud_probe_http_retries,
+        )
+        error_code = parse_azure_error_code(headers, body)
+    head_existence = classify_azure_blob_status(status, error_code)
+    if head_existence == "not_exists":
+        return account, container, status, head_existence, error_code, container_url
+    if head_existence == "confirmed_public":
+        # HEAD success alone does not prove anonymous listability.
+        head_existence = "likely_exists"
+
+    list_url = f"{container_url}&comp=list&maxresults=1"
+    status, body, headers = fetch_url(
+        list_url, timeout=timeout, method="GET", retries=cloud_probe_http_retries
+    )
+    error_code = parse_azure_error_code(headers, body)
+    if error_code == "FeatureVersionMismatch":
+        status, body, headers = fetch_url(
+            list_url,
             timeout=timeout,
             method="GET",
             headers={"x-ms-version": azure_blob_api_version},
@@ -1073,7 +1093,9 @@ def check_single_azure_blob_container(
         )
         error_code = parse_azure_error_code(headers, body)
     existence = classify_azure_blob_status(status, error_code)
-    return account, container, status, existence, error_code, url
+    if existence == "unknown" and head_existence == "likely_exists":
+        existence = "likely_exists"
+    return account, container, status, existence, error_code, list_url
 
 
 def collect_azure_blob_findings(

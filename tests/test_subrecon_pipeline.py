@@ -1298,16 +1298,21 @@ class SubreconPipelineTest(unittest.TestCase):
     def test_check_single_azure_blob_container_uses_cloud_probe_retry_policy(
         self, mock_fetch_url
     ) -> None:
-        mock_fetch_url.return_value = (200, "", {})
+        mock_fetch_url.side_effect = [
+            (200, "", {}),
+            (200, "", {}),
+        ]
         _, _, status, _, _, _ = subrecon.check_single_azure_blob_container(
             "azureopendatastorage",
             "mlsamples",
             5,
         )
         self.assertEqual(status, 200)
-        self.assertEqual(mock_fetch_url.call_count, 1)
+        self.assertEqual(mock_fetch_url.call_count, 2)
+        self.assertEqual(mock_fetch_url.call_args_list[0].kwargs.get("method"), "HEAD")
+        self.assertEqual(mock_fetch_url.call_args_list[1].kwargs.get("method"), "GET")
         self.assertEqual(
-            mock_fetch_url.call_args.kwargs.get("retries"),
+            mock_fetch_url.call_args_list[0].kwargs.get("retries"),
             subrecon.CLOUD_PROBE_HTTP_RETRIES,
         )
 
@@ -1332,7 +1337,8 @@ class SubreconPipelineTest(unittest.TestCase):
     ) -> None:
         mock_fetch_url.side_effect = [
             (409, "<Error><Code>FeatureVersionMismatch</Code></Error>", {}),
-            (200, "", {"x-ms-version": subrecon.AZURE_BLOB_API_VERSION}),
+            (200, "", {}),
+            (200, "", {}),
         ]
         _, _, status, existence, _, _ = subrecon.check_single_azure_blob_container(
             "azureopendatastorage",
@@ -1341,11 +1347,34 @@ class SubreconPipelineTest(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(existence, "confirmed_public")
-        self.assertEqual(mock_fetch_url.call_count, 2)
+        self.assertEqual(mock_fetch_url.call_count, 3)
         self.assertEqual(
             mock_fetch_url.call_args_list[1].kwargs.get("headers"),
             {"x-ms-version": subrecon.AZURE_BLOB_API_VERSION},
         )
+
+    @patch("subrecon.fetch_url")
+    def test_check_single_azure_blob_container_short_circuits_on_not_exists_head(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.return_value = (
+            404,
+            "<Error><Code>ContainerNotFound</Code></Error>",
+            {},
+        )
+        _, _, status, existence, error_code, url = (
+            subrecon.check_single_azure_blob_container(
+                "azureopendatastorage",
+                "definitely-not-real-container-xyz",
+                5,
+            )
+        )
+        self.assertEqual(status, 404)
+        self.assertEqual(existence, "not_exists")
+        self.assertEqual(error_code, "ContainerNotFound")
+        self.assertEqual(mock_fetch_url.call_count, 1)
+        self.assertIn("?restype=container", url)
+        self.assertNotIn("comp=list", url)
 
     def test_match_takeover_signature(self) -> None:
         signature, cname = subrecon.match_takeover_signature(["foo.readthedocs.io"])

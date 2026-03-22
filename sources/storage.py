@@ -1098,6 +1098,36 @@ def check_single_azure_blob_container(
     return account, container, status, existence, error_code, list_url
 
 
+def probe_azure_blob_object_access(
+    account: str,
+    container: str,
+    object_path: str,
+    timeout: int,
+    *,
+    fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
+    parse_azure_error_code: Callable[[dict[str, str], str], str],
+    azure_blob_api_version: str,
+    cloud_probe_http_retries: int,
+) -> tuple[int, str, str]:
+    encoded_container = quote(container, safe="")
+    encoded_object_path = quote(object_path.lstrip("/"), safe="/")
+    url = f"https://{account}.blob.core.windows.net/{encoded_container}/{encoded_object_path}"
+    status, body, headers = fetch_url(
+        url, timeout=timeout, method="HEAD", retries=cloud_probe_http_retries
+    )
+    error_code = parse_azure_error_code(headers, body)
+    if error_code == "FeatureVersionMismatch":
+        status, body, headers = fetch_url(
+            url,
+            timeout=timeout,
+            method="HEAD",
+            headers={"x-ms-version": azure_blob_api_version},
+            retries=cloud_probe_http_retries,
+        )
+        error_code = parse_azure_error_code(headers, body)
+    return status, error_code, url
+
+
 def collect_azure_blob_findings(
     context: ScanContext,
     hosts: set[str],
@@ -1109,6 +1139,10 @@ def collect_azure_blob_findings(
     check_single_azure_blob_container: Callable[
         [str, str, int], tuple[str, str, int, str, str, str]
     ],
+    probe_azure_blob_object_access: Callable[
+        [str, str, str, int], tuple[int, str, str]
+    ],
+    azure_blob_object_probe_paths: tuple[str, ...],
     azure_blob_reference_url: str,
     azure_blob_system_containers: tuple[str, ...],
 ) -> list[Finding]:
@@ -1209,9 +1243,11 @@ def collect_azure_blob_findings(
 
     likely_exists = 0
     not_exists = 0
+    blob_only_hits = 0
     system_container_hits = 0
     system_container_set = set(azure_blob_system_containers)
     error_code_counts: dict[str, int] = {}
+    blob_object_probes = 0
     with ThreadPoolExecutor(max_workers=context.threads) as pool:
         futures = {
             pool.submit(
@@ -1247,6 +1283,89 @@ def collect_azure_blob_findings(
                 )
 
             if existence == "likely_exists":
+                if context.azure_blob_object_probe and azure_blob_object_probe_paths:
+                    found_public_object: Optional[tuple[str, int, str, str]] = None
+                    for object_path in azure_blob_object_probe_paths:
+                        blob_object_probes += 1
+                        object_status, object_error_code, object_url = (
+                            probe_azure_blob_object_access(
+                                account, container, object_path, context.timeout
+                            )
+                        )
+                        if object_error_code:
+                            error_code_counts[object_error_code] = (
+                                int(error_code_counts.get(object_error_code, 0)) + 1
+                            )
+                        if object_status == 200:
+                            found_public_object = (
+                                object_path,
+                                object_status,
+                                object_error_code,
+                                object_url,
+                            )
+                            break
+                    if found_public_object is not None:
+                        blob_only_hits += 1
+                        object_path, object_status, object_error_code, object_url = (
+                            found_public_object
+                        )
+                        linked_hosts = sorted(account_to_hosts.get(account, set()))
+                        source_hosts = (
+                            ", ".join(linked_hosts[:5]) if linked_hosts else "unknown"
+                        )
+                        extra = "..." if len(linked_hosts) > 5 else ""
+                        object_code_note = (
+                            f"; x-ms-error-code={object_error_code}"
+                            if object_error_code
+                            else ""
+                        )
+                        findings.append(
+                            Finding(
+                                asset_type="azure_blob_container",
+                                asset=f"{account}/{container}",
+                                severity="medium",
+                                confidence="medium",
+                                title="Publicly readable Azure Blob object (list denied)",
+                                description=(
+                                    "Anonymous list access appears denied, but an "
+                                    "object probe returned HTTP 200. Validate blob-level "
+                                    "public access policy in an authorized workflow."
+                                ),
+                                source="azure-blob-object-head",
+                                tags=[
+                                    "cloud",
+                                    "azure",
+                                    "blob",
+                                    "passive",
+                                    "blob-readable",
+                                ],
+                                evidence=[
+                                    Evidence(
+                                        source_url=object_url,
+                                        note=(
+                                            "HEAD status="
+                                            f"{object_status}. object_path={object_path}"
+                                            f"{object_code_note}"
+                                        ),
+                                    ),
+                                    Evidence(
+                                        source_url=f"https://{account}.blob.core.windows.net/",
+                                        note=(
+                                            "Storage account inferred from discovered host "
+                                            f"CNAME(s): {source_hosts}{extra}"
+                                        ),
+                                    ),
+                                    Evidence(
+                                        source_url=azure_blob_reference_url,
+                                        note=(
+                                            "Azure Blob public-access behavior reference "
+                                            "(list/properties probing patterns)."
+                                        ),
+                                    ),
+                                ],
+                            )
+                        )
+                        continue
                 likely_exists += 1
                 continue
             if existence == "not_exists":
@@ -1301,6 +1420,8 @@ def collect_azure_blob_findings(
     stats["likely_exists"] = likely_exists
     stats["not_exists"] = not_exists
     stats["error_code_counts"] = error_code_counts
+    stats["blob_object_probes"] = blob_object_probes
+    stats["blob_only_hits"] = blob_only_hits
     stats["system_container_hits"] = system_container_hits
     stats["hosts"] = len(findings)
     stats["findings"] = len(findings)

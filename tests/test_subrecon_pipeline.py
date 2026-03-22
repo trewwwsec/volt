@@ -966,9 +966,10 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(health["status"], "error")
 
     @patch("subrecon.check_single_azure_blob_container")
+    @patch("subrecon.probe_azure_blob_object_access")
     @patch("subrecon.fetch_doh_cname_records")
     def test_collect_azure_blob_findings_detects_public_container(
-        self, mock_fetch_doh, mock_check_azure
+        self, mock_fetch_doh, _mock_probe_object, mock_check_azure
     ) -> None:
         mock_fetch_doh.return_value = (
             200,
@@ -1010,9 +1011,10 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(health["findings"], 1)
 
     @patch("subrecon.check_single_azure_blob_container")
+    @patch("subrecon.probe_azure_blob_object_access")
     @patch("subrecon.fetch_doh_cname_records")
     def test_collect_azure_blob_findings_includes_system_containers(
-        self, mock_fetch_doh, mock_check_azure
+        self, mock_fetch_doh, _mock_probe_object, mock_check_azure
     ) -> None:
         mock_fetch_doh.return_value = (
             200,
@@ -1053,9 +1055,10 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertGreater(health.get("system_container_hits", 0), 0)
 
     @patch("subrecon.check_single_azure_blob_container")
+    @patch("subrecon.probe_azure_blob_object_access")
     @patch("subrecon.fetch_doh_cname_records")
     def test_collect_azure_blob_findings_infers_account_from_host_without_cname(
-        self, mock_fetch_doh, mock_check_azure
+        self, mock_fetch_doh, _mock_probe_object, mock_check_azure
     ) -> None:
         mock_fetch_doh.return_value = (
             200,
@@ -1097,9 +1100,10 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(health["status"], "ok")
 
     @patch("subrecon.check_single_azure_blob_container")
+    @patch("subrecon.probe_azure_blob_object_access")
     @patch("subrecon.fetch_doh_cname_records")
     def test_collect_azure_blob_findings_tracks_error_code_telemetry(
-        self, mock_fetch_doh, mock_check_azure
+        self, mock_fetch_doh, _mock_probe_object, mock_check_azure
     ) -> None:
         mock_fetch_doh.return_value = (
             200,
@@ -1154,6 +1158,66 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(
             health.get("error_code_counts", {}).get("ContainerNotFound"), 1
         )
+
+    @patch("subrecon.check_single_azure_blob_container")
+    @patch("subrecon.probe_azure_blob_object_access")
+    @patch("subrecon.fetch_doh_cname_records")
+    def test_collect_azure_blob_findings_detects_blob_only_public_access(
+        self, mock_fetch_doh, mock_probe_object, mock_check_azure
+    ) -> None:
+        mock_fetch_doh.return_value = (
+            200,
+            ["acmestorage.blob.core.windows.net"],
+            "https://dns.google/resolve?name=app.example.com&type=CNAME",
+        )
+
+        def fake_check(account: str, container: str, timeout: int):
+            if container == "example":
+                return (
+                    account,
+                    container,
+                    403,
+                    "likely_exists",
+                    "NoAuthenticationInformation",
+                    "https://example",
+                )
+            return (
+                account,
+                container,
+                404,
+                "unknown",
+                "",
+                "https://example",
+            )
+
+        def fake_probe(account: str, container: str, object_path: str, timeout: int):
+            if container == "example" and object_path == "index.html":
+                return (
+                    200,
+                    "",
+                    f"https://{account}.blob.core.windows.net/example/index.html",
+                )
+            return (
+                404,
+                "BlobNotFound",
+                f"https://{account}.blob.core.windows.net/{container}/{object_path}",
+            )
+
+        mock_check_azure.side_effect = fake_check
+        mock_probe_object.side_effect = fake_probe
+        ctx = self._default_context()
+        ctx.domains = []
+        ctx.organization = ""
+        ctx.keywords = ["example"]
+        ctx.max_bucket_candidates = 40
+        ctx.azure_blob_object_probe = True
+        health = subrecon.init_source_health("azure")
+        findings = subrecon.collect_azure_blob_findings(
+            ctx, {"app.example.com"}, health
+        )
+        self.assertTrue(any(f.asset == "acmestorage/example" for f in findings))
+        self.assertGreater(health.get("blob_only_hits", 0), 0)
+        self.assertGreater(health.get("blob_object_probes", 0), 0)
 
     @patch("subrecon.fetch_doh_cname_records")
     def test_collect_azure_blob_findings_partial_when_doh_errors(
@@ -1621,8 +1685,11 @@ class SubreconPipelineTest(unittest.TestCase):
         parser = subrecon.build_parser()
         args = parser.parse_args(["-d", "example.com"])
         self.assertFalse(args.no_azure)
+        self.assertFalse(args.azure_blob_object_probe)
         args = parser.parse_args(["-d", "example.com", "--no-azure"])
         self.assertTrue(args.no_azure)
+        args = parser.parse_args(["-d", "example.com", "--azure-object-probe"])
+        self.assertTrue(args.azure_blob_object_probe)
 
     def test_build_parser_reliability_defaults(self) -> None:
         parser = subrecon.build_parser()

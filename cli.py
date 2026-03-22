@@ -198,6 +198,15 @@ def build_parser(*, positive_int: Callable[[str], int]) -> argparse.ArgumentPars
         "--no-azure", action="store_true", help="Disable Azure Blob container checks"
     )
     parser.add_argument(
+        "--azure-object-probe",
+        action="store_true",
+        dest="azure_blob_object_probe",
+        help=(
+            "Enable optional anonymous blob-object probes for likely-existing Azure "
+            "containers when list access is denied"
+        ),
+    )
+    parser.add_argument(
         "--no-takeover",
         action="store_true",
         help="Disable passive subdomain takeover fingerprint checks",
@@ -257,6 +266,7 @@ def run_scan(
         s3_probe_retries=getattr(args, "s3_probe_retries", 0),
         gcp_dual_endpoint_probe=getattr(args, "gcp_dual_endpoint_probe", False),
         gcp_probe_retries=getattr(args, "gcp_probe_retries", 0),
+        azure_blob_object_probe=getattr(args, "azure_blob_object_probe", False),
     )
 
     print(f"[*] Passive scan started for {len(domains)} domain(s)")
@@ -357,7 +367,13 @@ def run_scan(
         print(f"    [gcp] matching bucket names: {len(gcp_findings)}")
 
     if not args.no_azure:
-        print("[*] Checking inferred Azure Blob containers (CNAME + list probe)...")
+        if getattr(args, "azure_blob_object_probe", False):
+            print(
+                "[*] Checking inferred Azure Blob containers "
+                "(CNAME + list probe + optional object probe)..."
+            )
+        else:
+            print("[*] Checking inferred Azure Blob containers (CNAME + list probe)...")
         azure_findings = collect_azure_blob_findings(
             context, discovered_hosts, source_health["azure"]
         )
@@ -402,6 +418,11 @@ def run_scan(
         legal_notes.append(
             "GCP dual-endpoint probing may add optional virtual-hosted XML endpoint "
             "checks when path-style responses are ambiguous."
+        )
+    if getattr(args, "azure_blob_object_probe", False):
+        legal_notes.append(
+            "Azure object probing uses anonymous HEAD requests against selected blob "
+            "paths to detect blob-public access when listing is denied."
         )
 
     return {

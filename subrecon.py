@@ -34,6 +34,7 @@ from constants import (
     AZURE_BLOB_DNS_ZONE_CNAME_SUFFIXES,
     AZURE_BLOB_LIKELY_EXISTS_ERROR_CODES,
     AZURE_BLOB_NOT_EXISTS_ERROR_CODES,
+    AZURE_BLOB_OBJECT_PROBE_PATHS,
     AZURE_BLOB_REFERENCE_URL,
     AZURE_BLOB_SYSTEM_CONTAINERS,
     AZURE_BLOB_WEB_CNAME_SUFFIXES,
@@ -86,6 +87,7 @@ from sources.storage import (
     parse_azure_error_code as parse_azure_error_code_source,
     parse_gcp_error_code as parse_gcp_error_code_source,
     parse_s3_error_code as parse_s3_error_code_source,
+    probe_azure_blob_object_access as probe_azure_blob_object_access_source,
     probe_gcp_object_access as probe_gcp_object_access_source,
     probe_gcp_list_access as probe_gcp_list_access_source,
     probe_s3_object_access as probe_s3_object_access_source,
@@ -690,6 +692,21 @@ def check_single_azure_blob_container(
     )
 
 
+def probe_azure_blob_object_access(
+    account: str, container: str, object_path: str, timeout: int
+) -> tuple[int, str, str]:
+    return probe_azure_blob_object_access_source(
+        account,
+        container,
+        object_path,
+        timeout,
+        fetch_url=fetch_url,
+        parse_azure_error_code=parse_azure_error_code,
+        azure_blob_api_version=AZURE_BLOB_API_VERSION,
+        cloud_probe_http_retries=CLOUD_PROBE_HTTP_RETRIES,
+    )
+
+
 def collect_azure_blob_findings(
     context: ScanContext, hosts: set[str], health: Optional[dict[str, Any]] = None
 ) -> list[Finding]:
@@ -702,6 +719,8 @@ def collect_azure_blob_findings(
         extract_azure_storage_account_from_cname=extract_azure_storage_account_from_cname,
         build_azure_container_wordlist=build_azure_container_wordlist,
         check_single_azure_blob_container=check_single_azure_blob_container,
+        probe_azure_blob_object_access=probe_azure_blob_object_access,
+        azure_blob_object_probe_paths=AZURE_BLOB_OBJECT_PROBE_PATHS,
         azure_blob_reference_url=AZURE_BLOB_REFERENCE_URL,
         azure_blob_system_containers=AZURE_BLOB_SYSTEM_CONTAINERS,
     )

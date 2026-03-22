@@ -79,6 +79,11 @@ AZURE_BLOB_SYSTEM_CONTAINERS = (
     "$root",
     "$logs",
 )
+AZURE_BLOB_OBJECT_PROBE_PATHS = (
+    "index.html",
+    "robots.txt",
+    "favicon.ico",
+)
 AZURE_BLOB_LIKELY_EXISTS_ERROR_CODES = {
     "AuthorizationFailure",
     "AuthorizationPermissionMismatch",

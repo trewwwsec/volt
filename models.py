@@ -37,3 +37,4 @@ class ScanContext:
     s3_probe_retries: int = 0
     gcp_dual_endpoint_probe: bool = False
     gcp_probe_retries: int = 0
+    azure_blob_object_probe: bool = False

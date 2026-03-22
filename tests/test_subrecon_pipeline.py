@@ -511,6 +511,59 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(health.get("json_compat_fallbacks"), 1)
         self.assertTrue(any("-json unsupported" in note for note in health["notes"]))
 
+    @patch("subrecon.run_command")
+    @patch("subrecon.check_tool")
+    @patch("builtins.print")
+    def test_collect_amass_subdomains_timeout_retry_marks_partial(
+        self, _mock_print, mock_check_tool, mock_run_command
+    ) -> None:
+        mock_check_tool.return_value = True
+        mock_run_command.side_effect = [
+            (1, "", "flag provided but not defined: -src"),
+            (1, "", "flag provided but not defined: -json"),
+            (124, "", ""),
+            (124, "", ""),
+        ]
+        health = subrecon.init_source_health("amass")
+        hosts, findings = subrecon.collect_amass_subdomains(
+            self._default_context(), health
+        )
+        self.assertEqual(hosts, set())
+        self.assertEqual(findings, [])
+        self.assertEqual(mock_run_command.call_count, 4)
+        fallback_cmd = mock_run_command.call_args_list[-1][0][0]
+        self.assertIn("-nocolor", fallback_cmd)
+        self.assertIn("-silent", fallback_cmd)
+        self.assertIn("-norecursive", fallback_cmd)
+        self.assertEqual(health.get("timeouts"), 1)
+        self.assertEqual(health.get("errors"), 0)
+        self.assertEqual(health.get("status"), "partial")
+        self.assertEqual(health.get("timeout_retries"), 1)
+        self.assertEqual(health.get("timeout_exhausted_domains"), 1)
+        self.assertEqual(health.get("error_types", {}).get("amass_timeout"), 1)
+
+    @patch("subrecon.run_command")
+    @patch("subrecon.check_tool")
+    @patch("builtins.print")
+    def test_collect_amass_subdomains_ok_no_results_after_empty_completion(
+        self, _mock_print, mock_check_tool, mock_run_command
+    ) -> None:
+        mock_check_tool.return_value = True
+        mock_run_command.side_effect = [
+            (1, "", "flag provided but not defined: -src"),
+            (1, "", "flag provided but not defined: -json"),
+            (0, "", ""),
+        ]
+        health = subrecon.init_source_health("amass")
+        hosts, findings = subrecon.collect_amass_subdomains(
+            self._default_context(), health
+        )
+        self.assertEqual(hosts, set())
+        self.assertEqual(findings, [])
+        self.assertEqual(health.get("timeouts"), 0)
+        self.assertEqual(health.get("errors"), 0)
+        self.assertEqual(health.get("status"), "ok_no_results")
+
     @patch("subrecon.check_single_bucket_exists")
     def test_collect_s3_bucket_findings_classifies_200_as_medium(
         self, mock_bucket_check

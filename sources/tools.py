@@ -135,30 +135,36 @@ def collect_amass_subdomains(
     fallback_domains = 0
     src_compat_fallbacks = 0
     json_compat_fallbacks = 0
+    timeout_retries = 0
+    timeout_exhausted_domains = 0
     for domain in context.domains:
         stats["queried"] += 1
-        cmd_with_src = [
+        amass_timeout_minutes = max(1, (context.tool_timeout + 59) // 60)
+        base_cmd = [
             "amass",
             "enum",
             "-passive",
             "-d",
             domain,
+            "-timeout",
+            str(amass_timeout_minutes),
+        ]
+        cmd_with_src = [
+            *base_cmd,
             "-src",
             "-json",
             "/dev/stdout",
         ]
         cmd_without_src = [
-            "amass",
-            "enum",
-            "-passive",
-            "-d",
-            domain,
+            *base_cmd,
             "-json",
             "/dev/stdout",
         ]
-        cmd_plain = ["amass", "enum", "-passive", "-d", domain]
+        cmd_plain = [*base_cmd]
+        cmd_plain_timeout_retry = [*base_cmd, "-nocolor", "-silent", "-norecursive"]
 
         rc, stdout, stderr = run_command(cmd_with_src, timeout=context.tool_timeout)
+        used_structured_mode = True
         err_text = f"{stderr}\n{stdout}".lower()
         if rc != 0 and amass_src_unsupported_error in err_text:
             src_compat_fallbacks += 1
@@ -177,6 +183,7 @@ def collect_amass_subdomains(
             err_text = f"{stderr}\n{stdout}".lower()
 
         if rc != 0 and amass_json_unsupported_error in err_text:
+            used_structured_mode = False
             json_compat_fallbacks += 1
             note = (
                 "amass -json unsupported by local version; falling back to "
@@ -189,7 +196,9 @@ def collect_amass_subdomains(
             )
             rc, stdout, stderr = run_command(cmd_plain, timeout=context.tool_timeout)
 
-        structured = parse_amass_structured_output(stdout, domain)
+        structured: dict[str, set[str]] = {}
+        if used_structured_mode:
+            structured = parse_amass_structured_output(stdout, domain)
         if structured:
             structured_domains += 1
             parsed = set(structured.keys())
@@ -197,23 +206,54 @@ def collect_amass_subdomains(
                 host_sources.setdefault(host, set()).update(sources)
         else:
             fallback_domains += 1
-            parsed = parse_hosts_from_output(stdout, domain)
+            parsed = parse_hosts_from_output(f"{stdout}\n{stderr}", domain)
             for host in parsed:
                 host_sources.setdefault(host, set())
+
+            if rc == 124 and not parsed:
+                timeout_retries += 1
+                note = (
+                    "amass timed out in structured mode; retrying reliability fallback "
+                    "with plain passive output"
+                )
+                if note not in stats["notes"]:
+                    stats["notes"].append(note)
+                print(
+                    f"    [amass] {domain}: timed out after {context.tool_timeout}s; retrying reliability fallback"
+                )
+                rc, stdout, stderr = run_command(
+                    cmd_plain_timeout_retry,
+                    timeout=context.tool_timeout,
+                )
+                parsed = parse_hosts_from_output(f"{stdout}\n{stderr}", domain)
+                for host in parsed:
+                    host_sources.setdefault(host, set())
+
+                if rc == 124 and not parsed:
+                    timeout_exhausted_domains += 1
+                    record_source_error(
+                        stats,
+                        "amass_timeout",
+                        detail=(
+                            f"domain={domain} timeout={context.tool_timeout}s "
+                            "(structured + fallback)"
+                        ),
+                        timeout=True,
+                    )
+                    print(
+                        f"    [amass] {domain}: fallback also timed out after {context.tool_timeout}s"
+                    )
+                    continue
+
+                if rc == 0 and not parsed:
+                    note = (
+                        "amass reliability fallback returned no hosts in this environment; "
+                        "continuing without amass findings"
+                    )
+                    if note not in stats["notes"]:
+                        stats["notes"].append(note)
         hosts.update(parsed)
 
-        if rc == 124 and not parsed:
-            record_source_error(
-                stats,
-                "amass_timeout",
-                detail=f"domain={domain} timeout={context.tool_timeout}s",
-                timeout=True,
-            )
-            print(
-                f"    [amass] {domain}: timed out after {context.tool_timeout}s "
-                "(try increasing --tool-timeout)"
-            )
-            continue
         if rc != 0 and not parsed:
             err = (stderr or "").strip().splitlines()
             detail = err[-1] if err else "unknown error"
@@ -263,6 +303,13 @@ def collect_amass_subdomains(
     stats["fallback_domains"] = fallback_domains
     stats["src_compat_fallbacks"] = src_compat_fallbacks
     stats["json_compat_fallbacks"] = json_compat_fallbacks
+    stats["timeout_retries"] = timeout_retries
+    stats["timeout_exhausted_domains"] = timeout_exhausted_domains
+    if not hosts and not stats["timeouts"] and not stats["errors"] and stats["queried"]:
+        stats["status"] = "ok_no_results"
     if stats["timeouts"] or stats["errors"]:
-        stats["status"] = "partial" if hosts else "error"
+        if not hosts and stats["timeouts"] and not stats["errors"]:
+            stats["status"] = "partial"
+        else:
+            stats["status"] = "partial" if hosts else "error"
     return hosts, findings

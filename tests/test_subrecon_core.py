@@ -5,7 +5,9 @@ import subrecon
 
 class CoreHelpersTest(unittest.TestCase):
     def test_normalize_domain(self) -> None:
-        self.assertEqual(subrecon.normalize_domain(" .WWW.Example.COM "), "www.example.com")
+        self.assertEqual(
+            subrecon.normalize_domain(" .WWW.Example.COM "), "www.example.com"
+        )
 
     def test_parse_keywords(self) -> None:
         self.assertEqual(
@@ -80,8 +82,55 @@ class CoreHelpersTest(unittest.TestCase):
         out = subrecon.dedupe_findings([one, two])
         self.assertEqual(len(out), 1)
 
+    def test_dedupe_findings_gcp_ignores_title(self) -> None:
+        one = subrecon.Finding(
+            asset_type="gcp_bucket",
+            asset="acme-assets",
+            severity="medium",
+            confidence="high",
+            title="one",
+            description="",
+            source="gcp-storage-head",
+        )
+        two = subrecon.Finding(
+            asset_type="gcp_bucket",
+            asset="ACME-ASSETS",
+            severity="medium",
+            confidence="high",
+            title="two",
+            description="",
+            source="gcp-storage-head",
+        )
+        out = subrecon.dedupe_findings([one, two])
+        self.assertEqual(len(out), 1)
+
+    def test_dedupe_findings_azure_ignores_title(self) -> None:
+        one = subrecon.Finding(
+            asset_type="azure_blob_container",
+            asset="acmestorage/acme-assets",
+            severity="high",
+            confidence="high",
+            title="one",
+            description="",
+            source="azure-blob-list",
+        )
+        two = subrecon.Finding(
+            asset_type="azure_blob_container",
+            asset="ACMESTORAGE/ACME-ASSETS",
+            severity="high",
+            confidence="high",
+            title="two",
+            description="",
+            source="azure-blob-list",
+        )
+        out = subrecon.dedupe_findings([one, two])
+        self.assertEqual(len(out), 1)
+
     def test_sanitize_bucket_label(self) -> None:
-        self.assertEqual(subrecon.sanitize_bucket_label("Acme Corp..Prod__Logs"), "acme-corp.prod-logs")
+        self.assertEqual(
+            subrecon.sanitize_bucket_label("Acme Corp..Prod__Logs"),
+            "acme-corp.prod-logs",
+        )
 
     def test_extract_bucket_candidates_from_hosts(self) -> None:
         candidates = subrecon.extract_bucket_candidates_from_hosts(

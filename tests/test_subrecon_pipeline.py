@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Optional
 from unittest.mock import patch
 
 import subrecon
@@ -27,6 +28,24 @@ def mk_finding(
         description="desc",
         source=source,
     )
+
+
+class DummyHTTPResponse:
+    def __init__(
+        self, status: int, body: str = "", headers: Optional[dict[str, str]] = None
+    ):
+        self.status = status
+        self._body = body
+        self.headers = headers or {}
+
+    def read(self) -> bytes:
+        return self._body.encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        return False
 
 
 class SubreconPipelineTest(unittest.TestCase):
@@ -137,8 +156,69 @@ class SubreconPipelineTest(unittest.TestCase):
         with self.assertRaises(argparse.ArgumentTypeError):
             subrecon.positive_int("abc")
 
+    def test_record_source_error_tracks_counts_and_samples(self) -> None:
+        health = subrecon.init_source_health("search")
+        subrecon.record_source_error(
+            health,
+            "commoncrawl_http_500",
+            detail="domain=example.com query=dotenv",
+        )
+        subrecon.record_source_error(
+            health,
+            "commoncrawl_http_500",
+            detail="domain=example.com query=dotenv",
+        )
+        subrecon.record_source_error(
+            health,
+            "subfinder_timeout",
+            detail="domain=example.com timeout=30s",
+            timeout=True,
+        )
+        self.assertEqual(health["errors"], 2)
+        self.assertEqual(health["timeouts"], 1)
+        self.assertEqual(health["error_types"]["commoncrawl_http_500"], 2)
+        self.assertEqual(health["error_types"]["subfinder_timeout"], 1)
+        self.assertEqual(len(health["error_samples"]), 2)
+
+    def test_normalize_source_health_sorts_and_dedupes(self) -> None:
+        source_health = {
+            "search": {
+                "notes": ["z-note", "a-note", "a-note", ""],
+                "error_types": {"b": 2, "a": 1},
+                "error_samples": [
+                    {"code": "b", "detail": "z"},
+                    {"code": "a", "detail": "a"},
+                    {"code": "a", "detail": "a"},
+                ],
+                "providers": {
+                    "bing": {
+                        "status": "partial",
+                        "notes": ["n2", "n1", "n1"],
+                    }
+                },
+            }
+        }
+        subrecon.normalize_source_health(source_health)
+        self.assertEqual(source_health["search"]["notes"], ["a-note", "z-note"])
+        self.assertEqual(
+            list(source_health["search"]["error_types"].keys()),
+            ["a", "b"],
+        )
+        self.assertEqual(
+            source_health["search"]["error_samples"],
+            [
+                {"code": "a", "detail": "a"},
+                {"code": "b", "detail": "z"},
+            ],
+        )
+        self.assertEqual(
+            source_health["search"]["providers"]["bing"]["notes"], ["n1", "n2"]
+        )
+
     def test_run_command_success_and_timeout(self) -> None:
-        rc, stdout, stderr = subrecon.run_command(["python3", "-c", "print('ok')"], timeout=2)
+        rc, stdout, stderr = subrecon.run_command(
+            ["python3", "-c", "print('ok')"], timeout=2
+        )
         self.assertEqual(rc, 0)
         self.assertEqual(stdout.strip(), "ok")
         self.assertEqual(stderr, "")
@@ -148,6 +228,63 @@ class SubreconPipelineTest(unittest.TestCase):
             timeout=1,
         )
         self.assertEqual(rc, 124)
+
+    @patch("subrecon.sleep")
+    @patch("subrecon.request.urlopen")
+    def test_fetch_url_retries_on_urlerror_then_succeeds(
+        self, mock_urlopen, mock_sleep
+    ) -> None:
+        mock_urlopen.side_effect = [
+            subrecon.error.URLError("temporary failure"),
+            DummyHTTPResponse(200, "ok", {"server": "test"}),
+        ]
+        status, body, headers = subrecon.fetch_url("https://example.com", timeout=2)
+        self.assertEqual(status, 200)
+        self.assertEqual(body, "ok")
+        self.assertEqual(headers.get("server"), "test")
+        self.assertEqual(mock_urlopen.call_count, 2)
+        mock_sleep.assert_called_once()
+
+    @patch("subrecon.sleep")
+    @patch("subrecon.request.urlopen")
+    def test_fetch_url_retries_on_retryable_http_status_then_succeeds(
+        self, mock_urlopen, mock_sleep
+    ) -> None:
+        transient = subrecon.error.HTTPError(
+            "https://example.com",
+            503,
+            "Service Unavailable",
+            {},
+            io.BytesIO(b"upstream unavailable"),
+        )
+        mock_urlopen.side_effect = [
+            transient,
+            DummyHTTPResponse(200, "ok", {"server": "test"}),
+        ]
+        status, body, _ = subrecon.fetch_url("https://example.com", timeout=2)
+        self.assertEqual(status, 200)
+        self.assertEqual(body, "ok")
+        self.assertEqual(mock_urlopen.call_count, 2)
+        mock_sleep.assert_called_once()
+
+    @patch("subrecon.sleep")
+    @patch("subrecon.request.urlopen")
+    def test_fetch_url_does_not_retry_non_retryable_http_status(
+        self, mock_urlopen, mock_sleep
+    ) -> None:
+        not_found = subrecon.error.HTTPError(
+            "https://example.com",
+            404,
+            "Not Found",
+            {},
+            io.BytesIO(b"missing"),
+        )
+        mock_urlopen.side_effect = [not_found]
+        status, body, _ = subrecon.fetch_url("https://example.com", timeout=2)
+        self.assertEqual(status, 404)
+        self.assertEqual(body, "missing")
+        self.assertEqual(mock_urlopen.call_count, 1)
+        mock_sleep.assert_not_called()
 
     @patch("subrecon.fetch_url")
     def test_collect_ct_subdomains_parses_rows(self, mock_fetch_url) -> None:
@@ -163,9 +300,30 @@ class SubreconPipelineTest(unittest.TestCase):
         hosts, findings = subrecon.collect_ct_subdomains(ctx)
         self.assertEqual(hosts, {"a.example.com", "b.example.com", "example.com"})
         self.assertEqual(len(findings), 3)
+        first_call = mock_fetch_url.call_args_list[0]
+        self.assertEqual(first_call.kwargs.get("retries"), subrecon.CT_HTTP_RETRIES)
 
     @patch("subrecon.fetch_url")
-    def test_collect_search_index_findings_filters_to_target_domain(self, mock_fetch_url) -> None:
+    def test_collect_ct_subdomains_partial_when_some_domains_fail(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.side_effect = [
+            (500, "", {}),
+            (200, '[{"name_value":"ok.example.org"}]', {}),
+        ]
+        ctx = self._default_context()
+        ctx.domains = ["example.com", "example.org"]
+        health = subrecon.init_source_health("crt.sh")
+        hosts, findings = subrecon.collect_ct_subdomains(ctx, health)
+        self.assertEqual(hosts, {"ok.example.org"})
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(health["errors"], 1)
+        self.assertEqual(health["status"], "partial")
+
+    @patch("subrecon.fetch_url")
+    def test_collect_search_index_findings_filters_to_target_domain(
+        self, mock_fetch_url
+    ) -> None:
         html = """
         <li class="b_algo"><h2><a href="https://a.example.com/.env">A</a></h2><p>dotenv</p></li>
         <li class="b_algo"><h2><a href="https://evil.com/.env">E</a></h2><p>dotenv</p></li>
@@ -180,10 +338,16 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertTrue(all("example.com" in f.asset for f in findings))
 
     @patch("subrecon.fetch_url")
-    def test_collect_search_index_findings_commoncrawl_provider(self, mock_fetch_url) -> None:
+    def test_collect_search_index_findings_commoncrawl_provider(
+        self, mock_fetch_url
+    ) -> None:
         mock_fetch_url.side_effect = [
             # collinfo.json
-            (200, '[{"cdx-api":"https://index.commoncrawl.org/CC-MAIN-2026-10-index"}]', {}),
+            (
+                200,
+                '[{"cdx-api":"https://index.commoncrawl.org/CC-MAIN-2026-10-index"}]',
+                {},
+            ),
             # one commoncrawl query success
             (200, '{"url":"https://a.example.com/.env"}\n', {}),
             # remaining commoncrawl queries fail quickly
@@ -191,12 +355,51 @@ class SubreconPipelineTest(unittest.TestCase):
         ]
         ctx = self._default_context()
         ctx.search_providers = ["commoncrawl"]
-        health = {"name": "search", "enabled": True, "status": "ok", "queried": 0, "hosts": 0, "findings": 0, "errors": 0, "timeouts": 0, "notes": []}
+        health = {
+            "name": "search",
+            "enabled": True,
+            "status": "ok",
+            "queried": 0,
+            "hosts": 0,
+            "findings": 0,
+            "errors": 0,
+            "timeouts": 0,
+            "notes": [],
+        }
         hosts, findings = subrecon.collect_search_index_findings(ctx, health)
         self.assertIn("a.example.com", hosts)
         self.assertTrue(any(f.source == "commoncrawl" for f in findings))
         self.assertIn("providers", health)
         self.assertIn("commoncrawl", health["providers"])
+
+    @patch("subrecon.fetch_url")
+    def test_collect_search_index_findings_commoncrawl_index_failure_sets_error(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.return_value = (500, "", {})
+        ctx = self._default_context()
+        ctx.search_providers = ["commoncrawl"]
+        health = subrecon.init_source_health("search")
+        hosts, findings = subrecon.collect_search_index_findings(ctx, health)
+        self.assertEqual(hosts, set())
+        self.assertEqual(findings, [])
+        self.assertEqual(health["status"], "error")
+        self.assertIn("failed to resolve Common Crawl index endpoint", health["notes"])
+        self.assertEqual(health["providers"]["commoncrawl"]["status"], "error")
+
+    @patch("subrecon.fetch_url")
+    def test_collect_search_index_findings_bing_no_results_sets_ok_no_results(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.return_value = (200, "<html><body>no hits</body></html>", {})
+        ctx = self._default_context()
+        ctx.search_providers = ["bing"]
+        health = subrecon.init_source_health("search")
+        hosts, findings = subrecon.collect_search_index_findings(ctx, health)
+        self.assertEqual(hosts, set())
+        self.assertEqual(findings, [])
+        self.assertEqual(health["status"], "ok_no_results")
+        self.assertEqual(health["providers"]["bing"]["status"], "ok_no_results")
 
     @patch("subrecon.run_command")
     @patch("subrecon.check_tool")
@@ -234,7 +437,11 @@ class SubreconPipelineTest(unittest.TestCase):
             0,
             json.dumps(
                 [
-                    {"name": "a.example.com", "source": "crtsh", "sources": [{"name": "dnsdb"}]},
+                    {
+                        "name": "a.example.com",
+                        "source": "crtsh",
+                        "sources": [{"name": "dnsdb"}],
+                    },
                     {"name": "b.example.com", "tag": "cert"},
                 ]
             ),
@@ -249,8 +456,65 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertIn("-src", cmd)
         self.assertIn("-json", cmd)
 
+    @patch("subrecon.run_command")
+    @patch("subrecon.check_tool")
+    @patch("builtins.print")
+    def test_collect_amass_subdomains_retries_without_src_when_unsupported(
+        self, _mock_print, mock_check_tool, mock_run_command
+    ) -> None:
+        mock_check_tool.return_value = True
+        mock_run_command.side_effect = [
+            (1, "", "flag provided but not defined: -src"),
+            (0, json.dumps([{"name": "a.example.com"}]), ""),
+        ]
+        health = subrecon.init_source_health("amass")
+        hosts, findings = subrecon.collect_amass_subdomains(
+            self._default_context(), health
+        )
+        self.assertEqual(hosts, {"a.example.com"})
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(mock_run_command.call_count, 2)
+        first_cmd = mock_run_command.call_args_list[0][0][0]
+        second_cmd = mock_run_command.call_args_list[1][0][0]
+        self.assertIn("-src", first_cmd)
+        self.assertNotIn("-src", second_cmd)
+        self.assertEqual(health.get("src_compat_fallbacks"), 1)
+        self.assertTrue(any("-src unsupported" in note for note in health["notes"]))
+
+    @patch("subrecon.run_command")
+    @patch("subrecon.check_tool")
+    @patch("builtins.print")
+    def test_collect_amass_subdomains_retries_plain_output_when_json_unsupported(
+        self, _mock_print, mock_check_tool, mock_run_command
+    ) -> None:
+        mock_check_tool.return_value = True
+        mock_run_command.side_effect = [
+            (1, "", "flag provided but not defined: -src"),
+            (1, "", "flag provided but not defined: -json"),
+            (0, "a.example.com\nevil.com\n", ""),
+        ]
+        health = subrecon.init_source_health("amass")
+        hosts, findings = subrecon.collect_amass_subdomains(
+            self._default_context(), health
+        )
+        self.assertEqual(hosts, {"a.example.com"})
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(mock_run_command.call_count, 3)
+        first_cmd = mock_run_command.call_args_list[0][0][0]
+        second_cmd = mock_run_command.call_args_list[1][0][0]
+        third_cmd = mock_run_command.call_args_list[2][0][0]
+        self.assertIn("-src", first_cmd)
+        self.assertIn("-json", second_cmd)
+        self.assertNotIn("-src", third_cmd)
+        self.assertNotIn("-json", third_cmd)
+        self.assertEqual(health.get("src_compat_fallbacks"), 1)
+        self.assertEqual(health.get("json_compat_fallbacks"), 1)
+        self.assertTrue(any("-json unsupported" in note for note in health["notes"]))
+
     @patch("subrecon.check_single_bucket_exists")
-    def test_collect_s3_bucket_findings_classifies_200_as_medium(self, mock_bucket_check) -> None:
+    def test_collect_s3_bucket_findings_classifies_200_as_medium(
+        self, mock_bucket_check
+    ) -> None:
         def fake_check(bucket: str, timeout: int, s3_list_probe: bool = False):
             if bucket == "mybucket":
                 return bucket, 200, "confirmed_exists", "us-east-1", None
@@ -268,13 +532,38 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(by_asset["mybucket"].severity, "medium")
         self.assertIn("example", by_asset)
         self.assertEqual(by_asset["example"].severity, "low")
-        self.assertEqual(by_asset["example"].title, "S3 bucket name likely exists (HEAD signal)")
+        self.assertEqual(
+            by_asset["example"].title, "S3 bucket name likely exists (HEAD signal)"
+        )
 
     def test_classify_s3_head_status(self) -> None:
-        self.assertEqual(subrecon.classify_s3_head_status(200, "us-east-1"), "confirmed_exists")
-        self.assertEqual(subrecon.classify_s3_head_status(403, "us-east-1"), "likely_exists")
+        self.assertEqual(
+            subrecon.classify_s3_head_status(200, "us-east-1"), "confirmed_exists"
+        )
+        self.assertEqual(
+            subrecon.classify_s3_head_status(403, "us-east-1"), "likely_exists"
+        )
         self.assertEqual(subrecon.classify_s3_head_status(403, ""), "unknown")
         self.assertEqual(subrecon.classify_s3_head_status(404, ""), "unknown")
+
+    def test_classify_gcp_status(self) -> None:
+        self.assertEqual(subrecon.classify_gcp_status(200), "confirmed_exists")
+        self.assertEqual(subrecon.classify_gcp_status(403), "likely_exists")
+        self.assertEqual(subrecon.classify_gcp_status(404), "unknown")
+
+    def test_classify_azure_blob_status(self) -> None:
+        self.assertEqual(
+            subrecon.classify_azure_blob_status(200, ""),
+            "confirmed_public",
+        )
+        self.assertEqual(
+            subrecon.classify_azure_blob_status(403, "AuthorizationFailure"),
+            "likely_exists",
+        )
+        self.assertEqual(
+            subrecon.classify_azure_blob_status(404, "ContainerNotFound"),
+            "unknown",
+        )
 
     @patch("builtins.print")
     @patch("subrecon.check_single_bucket_exists")
@@ -286,15 +575,121 @@ class SubreconPipelineTest(unittest.TestCase):
         findings = subrecon.collect_s3_bucket_findings(ctx, hosts={"a.example.com"})
         self.assertEqual(findings, [])
 
+    @patch("subrecon.check_single_gcp_bucket_exists")
+    def test_collect_gcp_bucket_findings_classifies_200_as_medium(
+        self, mock_gcp_check
+    ) -> None:
+        def fake_check(bucket: str, timeout: int):
+            if bucket == "mybucket":
+                return bucket, 200, "confirmed_exists", None
+            if bucket == "example":
+                return bucket, 403, "likely_exists", None
+            return bucket, 404, "unknown", None
+
+        mock_gcp_check.side_effect = fake_check
+        ctx = self._default_context()
+        ctx.keywords = ["mybucket"]
+        findings = subrecon.collect_gcp_bucket_findings(ctx, hosts=set())
+        by_asset = {f.asset: f for f in findings}
+        self.assertIn("mybucket", by_asset)
+        self.assertEqual(by_asset["mybucket"].severity, "medium")
+        self.assertIn("example", by_asset)
+        self.assertEqual(by_asset["example"].severity, "low")
+        self.assertEqual(
+            by_asset["example"].title, "GCP bucket name likely exists (HTTP signal)"
+        )
+
     @patch("builtins.print")
     @patch("subrecon.check_single_bucket_exists")
     def test_collect_s3_bucket_findings_suppresses_weak_likely_probe403(
         self, mock_bucket_check, _mock_print
     ) -> None:
-        mock_bucket_check.return_value = ("example", 404, "likely_exists", "us-east-1", 403)
+        mock_bucket_check.return_value = (
+            "example",
+            404,
+            "likely_exists",
+            "us-east-1",
+            403,
+        )
         ctx = self._default_context()
         findings = subrecon.collect_s3_bucket_findings(ctx, hosts={"a.example.com"})
         self.assertEqual(findings, [])
+
+    @patch("subrecon.check_single_bucket_exists")
+    def test_collect_s3_bucket_findings_error_when_all_checks_fail(
+        self, mock_bucket_check
+    ) -> None:
+        mock_bucket_check.return_value = ("example", 0, "unknown", "", None)
+        ctx = self._default_context()
+        health = subrecon.init_source_health("s3")
+        findings = subrecon.collect_s3_bucket_findings(
+            ctx, hosts={"a.example.com"}, health=health
+        )
+        self.assertEqual(findings, [])
+        self.assertGreater(health["errors"], 0)
+        self.assertEqual(health["status"], "error")
+
+    @patch("subrecon.check_single_azure_blob_container")
+    @patch("subrecon.fetch_doh_cname_records")
+    def test_collect_azure_blob_findings_detects_public_container(
+        self, mock_fetch_doh, mock_check_azure
+    ) -> None:
+        mock_fetch_doh.return_value = (
+            200,
+            ["acmestorage.blob.core.windows.net"],
+            "https://dns.google/resolve?name=app.example.com&type=CNAME",
+        )
+
+        def fake_check(account: str, container: str, timeout: int):
+            if account == "acmestorage" and container == "example":
+                return (
+                    account,
+                    container,
+                    200,
+                    "confirmed_public",
+                    "",
+                    "https://example",
+                )
+            return (
+                account,
+                container,
+                404,
+                "unknown",
+                "ContainerNotFound",
+                "https://example",
+            )
+
+        mock_check_azure.side_effect = fake_check
+
+        ctx = self._default_context()
+        ctx.keywords = ["example"]
+        health = subrecon.init_source_health("azure")
+        findings = subrecon.collect_azure_blob_findings(
+            ctx, {"app.example.com"}, health
+        )
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].asset_type, "azure_blob_container")
+        self.assertEqual(findings[0].asset, "acmestorage/example")
+        self.assertEqual(health["status"], "ok")
+        self.assertEqual(health["findings"], 1)
+
+    @patch("subrecon.fetch_doh_cname_records")
+    def test_collect_azure_blob_findings_partial_when_doh_errors(
+        self, mock_fetch_doh
+    ) -> None:
+        mock_fetch_doh.return_value = (
+            0,
+            [],
+            "https://dns.google/resolve?name=app.example.com&type=CNAME",
+        )
+        ctx = self._default_context()
+        health = subrecon.init_source_health("azure")
+        findings = subrecon.collect_azure_blob_findings(
+            ctx, {"app.example.com"}, health
+        )
+        self.assertEqual(findings, [])
+        self.assertEqual(health["errors"], 1)
+        self.assertEqual(health["status"], "partial")
 
     @patch("subrecon.fetch_url")
     def test_check_single_bucket_exists_uses_list_probe_for_ambiguous_head(
@@ -305,19 +700,27 @@ class SubreconPipelineTest(unittest.TestCase):
             (404, "", {"server": "AmazonS3"}),
             (200, "<ListBucketResult/>", {"server": "AmazonS3"}),
         ]
-        bucket, status, existence, region, list_status = subrecon.check_single_bucket_exists(
-            "noaa-goes19",
-            5,
-            s3_list_probe=True,
+        bucket, status, existence, region, list_status = (
+            subrecon.check_single_bucket_exists(
+                "noaa-goes19",
+                5,
+                s3_list_probe=True,
+            )
         )
         self.assertEqual(bucket, "noaa-goes19")
         self.assertEqual(status, 404)
         self.assertEqual(existence, "confirmed_exists")
         self.assertEqual(region, "")
         self.assertEqual(list_status, 200)
+        head_call = mock_fetch_url.call_args_list[0]
+        self.assertEqual(
+            head_call.kwargs.get("retries"), subrecon.CLOUD_PROBE_HTTP_RETRIES
+        )
 
     @patch("subrecon.fetch_url")
-    def test_check_single_bucket_exists_defaults_to_list_probe(self, mock_fetch_url) -> None:
+    def test_check_single_bucket_exists_defaults_to_list_probe(
+        self, mock_fetch_url
+    ) -> None:
         mock_fetch_url.side_effect = [
             (404, "", {"server": "AmazonS3"}),
             (403, "", {"x-amz-bucket-region": "us-east-1"}),
@@ -330,6 +733,77 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(region, "us-east-1")
         self.assertEqual(list_status, 403)
 
+    @patch("subrecon.fetch_url")
+    def test_check_single_bucket_exists_uses_object_probe_for_nosuchkey_signal(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.side_effect = [
+            (404, "", {"server": "AmazonS3"}),
+            (404, "<Error><Code>NoSuchBucket</Code></Error>", {"server": "AmazonS3"}),
+            (404, "<Error><Code>NoSuchKey</Code></Error>", {"server": "AmazonS3"}),
+        ]
+        _, status, existence, _, list_status = subrecon.check_single_bucket_exists(
+            "noaa-goes16",
+            5,
+        )
+        self.assertEqual(status, 404)
+        self.assertEqual(list_status, 404)
+        self.assertEqual(existence, "confirmed_exists")
+        self.assertEqual(mock_fetch_url.call_count, 3)
+
+    @patch("subrecon.fetch_url")
+    def test_check_single_bucket_exists_uses_object_probe_for_nosuchbucket_signal(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.side_effect = [
+            (404, "", {"server": "AmazonS3"}),
+            (404, "<Error><Code>NoSuchBucket</Code></Error>", {"server": "AmazonS3"}),
+            (404, "<Error><Code>NoSuchBucket</Code></Error>", {"server": "AmazonS3"}),
+        ]
+        _, _, existence, _, _ = subrecon.check_single_bucket_exists(
+            "definitely-not-real-subrecon-bucket-xyz987",
+            5,
+        )
+        self.assertEqual(existence, "not_exists")
+
+    @patch("subrecon.fetch_url")
+    def test_check_single_azure_blob_container_uses_cloud_probe_retry_policy(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.return_value = (200, "", {})
+        _, _, status, _, _, _ = subrecon.check_single_azure_blob_container(
+            "azureopendatastorage",
+            "mlsamples",
+            5,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(mock_fetch_url.call_count, 1)
+        self.assertEqual(
+            mock_fetch_url.call_args.kwargs.get("retries"),
+            subrecon.CLOUD_PROBE_HTTP_RETRIES,
+        )
+
+    @patch("subrecon.fetch_url")
+    def test_check_single_azure_blob_container_retries_with_version_header(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.side_effect = [
+            (409, "<Error><Code>FeatureVersionMismatch</Code></Error>", {}),
+            (200, "", {"x-ms-version": subrecon.AZURE_BLOB_API_VERSION}),
+        ]
+        _, _, status, existence, _, _ = subrecon.check_single_azure_blob_container(
+            "azureopendatastorage",
+            "nyctlc",
+            5,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(existence, "confirmed_public")
+        self.assertEqual(mock_fetch_url.call_count, 2)
+        self.assertEqual(
+            mock_fetch_url.call_args_list[1].kwargs.get("headers"),
+            {"x-ms-version": subrecon.AZURE_BLOB_API_VERSION},
+        )
+
     def test_match_takeover_signature(self) -> None:
         signature, cname = subrecon.match_takeover_signature(["foo.readthedocs.io"])
         self.assertIsNotNone(signature)
@@ -337,7 +811,9 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(signature["provider"], "Read the Docs")
 
     @patch("subrecon.fetch_url")
-    def test_collect_subdomain_takeover_findings_detects_confirmed(self, mock_fetch_url) -> None:
+    def test_collect_subdomain_takeover_findings_detects_confirmed(
+        self, mock_fetch_url
+    ) -> None:
         mock_fetch_url.side_effect = [
             # DNS-over-HTTPS CNAME query
             (
@@ -345,14 +821,22 @@ class SubreconPipelineTest(unittest.TestCase):
                 json.dumps(
                     {
                         "Answer": [
-                            {"name": "docs.example.com.", "type": 5, "data": "foo.readthedocs.io."}
+                            {
+                                "name": "docs.example.com.",
+                                "type": 5,
+                                "data": "foo.readthedocs.io.",
+                            }
                         ]
                     }
                 ),
                 {},
             ),
             # HTTPS landing page probe
-            (404, "The link you have followed or the URL that you entered does not exist.", {}),
+            (
+                404,
+                "The link you have followed or the URL that you entered does not exist.",
+                {},
+            ),
         ]
         ctx = self._default_context()
         health = subrecon.init_source_health("takeover")
@@ -368,16 +852,24 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(finding.severity, "high")
         self.assertEqual(health["status"], "ok")
         self.assertEqual(health["findings"], 1)
+        for call in mock_fetch_url.call_args_list:
+            self.assertEqual(call.kwargs.get("retries"), subrecon.TAKEOVER_HTTP_RETRIES)
 
     @patch("subrecon.fetch_url")
-    def test_collect_subdomain_takeover_findings_requires_fingerprint(self, mock_fetch_url) -> None:
+    def test_collect_subdomain_takeover_findings_requires_fingerprint(
+        self, mock_fetch_url
+    ) -> None:
         mock_fetch_url.side_effect = [
             (
                 200,
                 json.dumps(
                     {
                         "Answer": [
-                            {"name": "docs.example.com.", "type": 5, "data": "foo.readthedocs.io."}
+                            {
+                                "name": "docs.example.com.",
+                                "type": 5,
+                                "data": "foo.readthedocs.io.",
+                            }
                         ]
                     }
                 ),
@@ -394,6 +886,116 @@ class SubreconPipelineTest(unittest.TestCase):
         )
         self.assertEqual(findings, [])
         self.assertEqual(health["status"], "ok_no_results")
+        for call in mock_fetch_url.call_args_list:
+            self.assertEqual(call.kwargs.get("retries"), subrecon.TAKEOVER_HTTP_RETRIES)
+
+    @patch("subrecon.fetch_url")
+    def test_collect_subdomain_takeover_findings_partial_on_probe_error(
+        self, mock_fetch_url
+    ) -> None:
+        def fake_fetch(url: str, timeout: int, **kwargs):
+            if "dns.google/resolve" in url and "good.example.com" in url:
+                return (
+                    200,
+                    json.dumps(
+                        {
+                            "Answer": [
+                                {"data": "foo.readthedocs.io."},
+                            ]
+                        }
+                    ),
+                    {},
+                )
+            if "dns.google/resolve" in url and "bad.example.com" in url:
+                return (
+                    200,
+                    json.dumps(
+                        {
+                            "Answer": [
+                                {"data": "foo.readthedocs.io."},
+                            ]
+                        }
+                    ),
+                    {},
+                )
+            if "good.example.com" in url:
+                return (
+                    404,
+                    "The link you have followed or the URL that you entered does not exist.",
+                    {},
+                )
+            if "bad.example.com" in url:
+                return (0, "", {})
+            return (0, "", {})
+
+        mock_fetch_url.side_effect = fake_fetch
+        ctx = self._default_context()
+        ctx.threads = 1
+        health = subrecon.init_source_health("takeover")
+        findings = subrecon.collect_subdomain_takeover_findings(
+            ctx, {"bad.example.com", "good.example.com"}, health
+        )
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].asset, "good.example.com")
+        self.assertEqual(health["errors"], 1)
+        self.assertEqual(health["status"], "partial")
+
+    @patch("subrecon.fetch_url")
+    def test_fetch_commoncrawl_index_endpoint_uses_search_retry_policy(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.return_value = (
+            200,
+            '[{"cdx-api":"https://index.commoncrawl.org/CC-MAIN-2026-10-index"}]',
+            {},
+        )
+        endpoint = subrecon.fetch_commoncrawl_index_endpoint(timeout=5)
+        self.assertEqual(
+            endpoint, "https://index.commoncrawl.org/CC-MAIN-2026-10-index"
+        )
+        self.assertEqual(mock_fetch_url.call_count, 1)
+        self.assertEqual(
+            mock_fetch_url.call_args.kwargs.get("retries"),
+            subrecon.SEARCH_HTTP_RETRIES,
+        )
+
+    @patch("subrecon.fetch_url")
+    def test_fetch_commoncrawl_index_endpoint_falls_back_to_id(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.return_value = (200, '[{"id":"CC-MAIN-2026-10"}]', {})
+        endpoint = subrecon.fetch_commoncrawl_index_endpoint(timeout=5)
+        self.assertEqual(
+            endpoint, "https://index.commoncrawl.org/CC-MAIN-2026-10-index"
+        )
+
+    @patch("subrecon.fetch_url")
+    def test_fetch_commoncrawl_results_dedupes_duplicate_urls(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.return_value = (
+            200,
+            "\n".join(
+                [
+                    '{"url":"https://a.example.com/.env"}',
+                    '{"url":"https://a.example.com/.env"}',
+                    '{"url":"https://b.example.com/.sql"}',
+                ]
+            ),
+            {},
+        )
+        status, results, query_url = subrecon.fetch_commoncrawl_results(
+            "https://index.commoncrawl.org/CC-MAIN-2026-10-index",
+            "*.example.com/*.env",
+            timeout=5,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(len(results), 2)
+        self.assertEqual(
+            sorted(item["url"] for item in results),
+            ["https://a.example.com/.env", "https://b.example.com/.sql"],
+        )
+        self.assertIn("output=json", query_url)
 
     def test_build_parser_rejects_non_positive_numeric_flags(self) -> None:
         parser = subrecon.build_parser()
@@ -419,7 +1021,29 @@ class SubreconPipelineTest(unittest.TestCase):
         args = parser.parse_args(["-d", "example.com", "--no-takeover"])
         self.assertTrue(args.no_takeover)
 
+    def test_build_parser_gcp_default_and_disable_flag(self) -> None:
+        parser = subrecon.build_parser()
+        args = parser.parse_args(["-d", "example.com"])
+        self.assertFalse(args.no_gcp)
+        args = parser.parse_args(["-d", "example.com", "--no-gcp"])
+        self.assertTrue(args.no_gcp)
+
+    def test_build_parser_azure_default_and_disable_flag(self) -> None:
+        parser = subrecon.build_parser()
+        args = parser.parse_args(["-d", "example.com"])
+        self.assertFalse(args.no_azure)
+        args = parser.parse_args(["-d", "example.com", "--no-azure"])
+        self.assertTrue(args.no_azure)
+
+    def test_build_parser_reliability_defaults(self) -> None:
+        parser = subrecon.build_parser()
+        args = parser.parse_args(["-d", "example.com"])
+        self.assertEqual(args.tool_timeout, 120)
+        self.assertEqual(args.max_bucket_candidates, 300)
+
     @patch("subrecon.collect_subdomain_takeover_findings")
+    @patch("subrecon.collect_azure_blob_findings")
+    @patch("subrecon.collect_gcp_bucket_findings")
     @patch("subrecon.collect_s3_bucket_findings")
     @patch("subrecon.collect_search_index_findings")
     @patch("subrecon.collect_ct_subdomains")
@@ -434,6 +1058,8 @@ class SubreconPipelineTest(unittest.TestCase):
         mock_ct,
         mock_search,
         mock_s3,
+        mock_gcp,
+        mock_azure,
         mock_takeover,
     ) -> None:
         sf_finding = mk_finding("subdomain", "a.example.com", "info", "sf")
@@ -444,13 +1070,17 @@ class SubreconPipelineTest(unittest.TestCase):
             "high",
             "Potential .env exposure indexed",
         )
-        s3_finding = mk_finding("s3_bucket", "a-example-assets", "low", "S3 bucket name exists")
+        s3_finding = mk_finding(
+            "s3_bucket", "a-example-assets", "low", "S3 bucket name exists"
+        )
 
         mock_subfinder.return_value = ({"a.example.com"}, [sf_finding])
         mock_amass.return_value = (set(), [])
         mock_ct.return_value = ({"a.example.com"}, [ct_finding])
         mock_search.return_value = ({"a.example.com"}, [search_finding])
         mock_s3.return_value = [s3_finding]
+        mock_gcp.return_value = []
+        mock_azure.return_value = []
         mock_takeover.return_value = []
 
         args = argparse.Namespace(
@@ -471,6 +1101,8 @@ class SubreconPipelineTest(unittest.TestCase):
             no_amass=False,
             no_search=False,
             no_s3=False,
+            no_gcp=False,
+            no_azure=False,
             no_takeover=False,
         )
         report = subrecon.run_scan(args)
@@ -481,7 +1113,11 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(report["findings"][0]["severity"], "high")
         self.assertIn("source_health", report)
         self.assertIn("search", report["source_health"])
+        self.assertIn("gcp", report["source_health"])
+        self.assertIn("azure", report["source_health"])
         self.assertIn("takeover", report["source_health"])
+        mock_gcp.assert_called_once()
+        mock_azure.assert_called_once()
         mock_takeover.assert_called_once()
 
     def test_run_scan_rejects_unknown_search_provider(self) -> None:
@@ -503,6 +1139,8 @@ class SubreconPipelineTest(unittest.TestCase):
             no_amass=True,
             no_search=True,
             no_s3=True,
+            no_gcp=True,
+            no_azure=True,
             no_takeover=True,
         )
         with self.assertRaises(ValueError):

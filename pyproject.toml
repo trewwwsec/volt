@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "subrecon"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Passive perimeter intelligence scanner for domains and organizations."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -23,6 +23,7 @@ package = true
 [tool.setuptools]
 py-modules = [
     "subrecon",
+    "subrecon_version",
     "cli",
     "constants",
     "core",
@@ -34,6 +35,9 @@ py-modules = [
     "subrecon_reporting",
 ]
 include-package-data = false
+
+[tool.setuptools.dynamic]
+version = { attr = "subrecon_version.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["."]

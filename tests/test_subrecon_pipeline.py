@@ -1710,6 +1710,15 @@ class SubreconPipelineTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 parser.parse_args(["-d", "example.com", "--max-bucket-candidates", "0"])
 
+    def test_build_parser_version_flag(self) -> None:
+        parser = subrecon.build_parser()
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            with self.assertRaises(SystemExit) as exc:
+                parser.parse_args(["--version"])
+        self.assertEqual(exc.exception.code, 0)
+        self.assertIn(subrecon.__version__, stdout.getvalue())
+
     def test_build_parser_s3_list_probe_default_and_disable_flag(self) -> None:
         parser = subrecon.build_parser()
         args = parser.parse_args(["-d", "example.com"])

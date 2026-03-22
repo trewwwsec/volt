@@ -73,7 +73,9 @@ def load_domains(
     return sorted(set(domains))
 
 
-def build_parser(*, positive_int: Callable[[str], int]) -> argparse.ArgumentParser:
+def build_parser(
+    *, positive_int: Callable[[str], int], version: str
+) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Passive perimeter discovery tool for domains/orgs using public OSINT "
@@ -85,6 +87,11 @@ def build_parser(*, positive_int: Callable[[str], int]) -> argparse.ArgumentPars
     parser.add_argument("-d", "--domain", help="Single root domain")
     parser.add_argument("-dL", "--domain-list", help="File with root domains")
     parser.add_argument("-o", "--output", default="perimeter_report.json")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {version}",
+    )
     parser.add_argument(
         "--organization",
         help="Organization/company name to improve bucket candidate generation",

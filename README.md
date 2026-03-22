@@ -40,14 +40,33 @@ It is designed for legal-safe OSINT workflows: no port scanning, no exploitation
 ## Requirements
 
 - Python 3.10+
+- `uv` (recommended)
 - Optional (for broader passive subdomain coverage):
   - `subfinder`
   - `amass`
 
+## Install (CLI)
+
+Install from this repository with `uv tool`:
+
+```bash
+uv tool install --from . subrecon
+subrecon --help
+```
+
+Install with `pipx`:
+
+```bash
+pipx install .
+subrecon --help
+```
+
+Script-first usage (`uv run python subrecon.py ...`) remains supported for compatibility, but command-first usage is now the default operator path.
+
 ## Development (uv)
 
 - Run the CLI:
-  - `uv run python subrecon.py -d example.com -o perimeter_report.json`
+  - `uv run subrecon -d example.com -o perimeter_report.json`
 - Run tests:
   - `uv run python -m unittest discover -s tests -p "test_*.py"`
 - Run lint:
@@ -57,56 +76,60 @@ It is designed for legal-safe OSINT workflows: no port scanning, no exploitation
 
 Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md)
 Testing: [docs/TESTING.md](docs/TESTING.md)
+Release process: [docs/RELEASE.md](docs/RELEASE.md)
+Changelog: [CHANGELOG.md](CHANGELOG.md)
+Security policy: [SECURITY.md](SECURITY.md)
 CI: `.github/workflows/ci.yml` (`push`/`pull_request`)
+Live smoke CI: `.github/workflows/live-smoke.yml` (`schedule`/`workflow_dispatch`, non-blocking)
 
 ## Usage
 
 ### Quick start (recommended defaults)
 
 ```bash
-uv run python subrecon.py -d example.com -o perimeter_report.json
+uv run subrecon -d example.com -o perimeter_report.json
 ```
 
 ### S3-focused check (high signal)
 
 ```bash
-uv run python subrecon.py -d example.com --keywords noaa-goes19 --no-ct --no-search --no-subfinder --no-amass --no-gcp --no-azure -o s3_report.json
+uv run subrecon -d example.com --keywords noaa-goes19 --no-ct --no-search --no-subfinder --no-amass --no-gcp --no-azure -o s3_report.json
 ```
 
 ### Takeover-focused check
 
 ```bash
-uv run python subrecon.py -d example.com --no-search --no-s3 --no-gcp --no-azure -o takeover_report.json
+uv run subrecon -d example.com --no-search --no-s3 --no-gcp --no-azure -o takeover_report.json
 ```
 
 ### Search-only check using Common Crawl
 
 ```bash
-uv run python subrecon.py -d example.com --search-providers commoncrawl --no-ct --no-subfinder --no-amass --no-s3 --no-gcp --no-azure -o search_report.json
+uv run subrecon -d example.com --search-providers commoncrawl --no-ct --no-subfinder --no-amass --no-s3 --no-gcp --no-azure -o search_report.json
 ```
 
 ### Single domain
 
 ```bash
-uv run python subrecon.py -d example.com -o perimeter_report.json
+uv run subrecon -d example.com -o perimeter_report.json
 ```
 
 ### Domain list
 
 ```bash
-uv run python subrecon.py -dL domains.txt -o perimeter_report.json
+uv run subrecon -dL domains.txt -o perimeter_report.json
 ```
 
 ### Add org context for better bucket-name intelligence
 
 ```bash
-uv run python subrecon.py -d example.com --organization "Acme Corp" --keywords acme,acmepay,acme-dev
+uv run subrecon -d example.com --organization "Acme Corp" --keywords acme,acmepay,acme-dev
 ```
 
 ### Disable modules
 
 ```bash
-uv run python subrecon.py -d example.com --no-search --no-s3
+uv run subrecon -d example.com --no-search --no-s3
 ```
 
 ## CLI
@@ -117,7 +140,7 @@ uv run python subrecon.py -d example.com --no-search --no-s3
 -o, --output           Output JSON file (default: perimeter_report.json)
 --organization         Organization name for better bucket candidate generation
 --keywords             Comma-separated org/brand keywords
---search-providers     Comma-separated search providers (default: bing,commoncrawl)
+--search-providers     Comma-separated search providers (default: commoncrawl; optional: bing)
 --timeout              HTTP timeout seconds (default: 10)
 --tool-timeout         Timeout for subfinder/amass runs (default: 120)
 -t, --threads          Concurrent worker threads (default: 20)
@@ -137,9 +160,9 @@ uv run python subrecon.py -d example.com --no-search --no-s3
 
 ## Search Providers
 
-- `bing`: HTML search parsing for dork-like queries.
-- `commoncrawl`: Common Crawl index queries.
-- Recommended stable setting for MVP use: `--search-providers commoncrawl`
+- `commoncrawl` (default): Common Crawl index queries with deterministic parsing behavior.
+- `bing` (optional / best-effort): HTML search parsing for dork-like queries that can drift with markup/rate limits.
+- To opt into both providers: `--search-providers commoncrawl,bing`
 
 ## Output Shape
 

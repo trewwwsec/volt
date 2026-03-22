@@ -65,8 +65,44 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
   - Added parser edge-case tests for S3/Azure error-code extraction fallbacks.
   - Added deterministic partial-failure simulation commands to `docs/TESTING.md`.
 
+## MVP Positioning Insight (March 22, 2026)
+
+- Current position: strong technical CLI MVP for security engineers.
+- Estimated readiness:
+  - MVP (engineer-facing CLI): `~8/10`
+  - Polished MVP (customer-facing): `~5.5/10`
+- Interpretation:
+  - Core detection/reporting pipeline is in good shape.
+  - Reliability and test gates are strong.
+  - Main remaining gap is productization and operator UX, not core scan logic.
+
+## Phase 5: Productization (Next)
+
+- Make distribution first-class:
+  - Ship an installable package with a `subrecon` CLI entry point.
+  - Move from script-first usage to command-first usage.
+- Stabilize default operator experience:
+  - Default search provider to `commoncrawl`; keep `bing` opt-in.
+  - Continue surfacing source reliability clearly via `source_health`.
+- Add release/governance basics:
+  - Introduce release notes/changelog and versioned release process.
+  - Add `SECURITY.md` and contribution guidance for external users.
+- Improve operational readiness:
+  - Add bounded live smoke validation as scheduled/manual CI (separate from unit gate).
+  - Keep deterministic tests as the required merge gate.
+- Status: in progress.
+
+### Phase 5 Exit Criteria
+
+- Install + run path is one command (`uv tool`/`pipx`) with `subrecon --help`.
+- First tagged release with versioned notes and upgrade guidance.
+- Operator docs include triage workflow for indexed-leak/cloud/takeover findings.
+- CI includes a non-blocking bounded live smoke job for upstream-source drift detection.
+
 ## Immediate Next Actions
 
-1. Periodically refresh the live-smoke snapshot in `docs/TESTING.md` as upstream sources evolve.
-2. Evaluate when to deprecate compatibility shims (`subrecon_models.py`, `subrecon_reporting.py`) after downstream consumers migrate.
-3. Keep CI runtime bounded while adding new targeted tests.
+- [x] Add packaging metadata + CLI entry point and validate install flow (`uv tool install` and `pipx`).
+- [x] Change default search provider set to `commoncrawl` and document `bing` as optional/best-effort.
+- [x] Add `CHANGELOG.md` + `SECURITY.md` and define first tagged release checklist.
+- [x] Add a scheduled/manual bounded live-smoke CI workflow and keep it non-blocking.
+- [x] Refresh `docs/TESTING.md` baseline counts and snapshots as part of each release cut.

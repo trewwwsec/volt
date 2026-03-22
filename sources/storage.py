@@ -1,0 +1,869 @@
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import re
+from time import time_ns
+from typing import Any, Callable, Optional
+
+from core import record_source_error
+from models import Evidence, Finding, ScanContext
+
+
+def sanitize_bucket_label(value: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9.-]", "-", value.lower())
+    cleaned = cleaned.strip("-.")
+    cleaned = re.sub(r"\.{2,}", ".", cleaned)
+    cleaned = re.sub(r"-{2,}", "-", cleaned)
+    return cleaned
+
+
+def sanitize_azure_container_label(value: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9-]", "-", value.lower())
+    cleaned = re.sub(r"-{2,}", "-", cleaned)
+    cleaned = cleaned.strip("-")
+    return cleaned
+
+
+def is_valid_azure_container_name(value: str) -> bool:
+    if not (3 <= len(value) <= 63):
+        return False
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*[a-z0-9]", value):
+        return False
+    return "--" not in value
+
+
+def extract_bucket_candidates_from_hosts(
+    hosts: set[str],
+    *,
+    sanitize_bucket_label: Callable[[str], str],
+) -> set[str]:
+    candidates: set[str] = set()
+
+    for host in hosts:
+        parts = host.split(".")
+        if not parts:
+            continue
+
+        candidates.add(sanitize_bucket_label(host.replace(".", "-")))
+
+        if len(parts) > 2:
+            left = "-".join(parts[:-2])
+            candidates.add(sanitize_bucket_label(left))
+
+        if "s3" in parts:
+            idx = parts.index("s3")
+            if idx > 0:
+                candidates.add(sanitize_bucket_label(parts[idx - 1]))
+
+    return {c for c in candidates if 3 <= len(c) <= 63}
+
+
+def extract_azure_storage_account_from_cname(
+    cname: str,
+    *,
+    normalize_domain: Callable[[str], str],
+    azure_blob_cname_suffixes: tuple[str, ...],
+) -> str:
+    candidate = normalize_domain(cname.rstrip("."))
+    if not candidate:
+        return ""
+
+    for suffix in azure_blob_cname_suffixes:
+        if candidate == suffix or not candidate.endswith(f".{suffix}"):
+            continue
+        prefix = candidate[: -(len(suffix) + 1)]
+        account = prefix.split(".", 1)[0]
+        if re.fullmatch(r"[a-z0-9]{3,24}", account):
+            return account
+    return ""
+
+
+def build_azure_container_wordlist(
+    context: ScanContext,
+    discovered_hosts: set[str],
+    *,
+    sanitize_azure_container_label: Callable[[str], str],
+    is_valid_azure_container_name: Callable[[str], bool],
+) -> set[str]:
+    words: set[str] = set()
+    common = {
+        "assets",
+        "backup",
+        "backups",
+        "data",
+        "files",
+        "logs",
+        "media",
+        "public",
+        "static",
+        "uploads",
+    }
+
+    for domain in context.domains:
+        base = domain.split(".")[0]
+        words.add(sanitize_azure_container_label(base))
+        words.add(sanitize_azure_container_label(domain.replace(".", "-")))
+
+    if context.organization:
+        words.add(
+            sanitize_azure_container_label(context.organization.replace(" ", "-"))
+        )
+
+    for kw in context.keywords:
+        words.add(sanitize_azure_container_label(kw))
+
+    for host in discovered_hosts:
+        parts = host.split(".")
+        if len(parts) > 2:
+            words.add(sanitize_azure_container_label(parts[0]))
+            words.add(sanitize_azure_container_label("-".join(parts[:-2])))
+
+    words.update(common)
+
+    patterns = [
+        "{w}",
+        "{w}-assets",
+        "{w}-backup",
+        "{w}-files",
+        "{w}-media",
+        "{w}-static",
+        "{w}-uploads",
+    ]
+
+    candidates: set[str] = set()
+    for word in words:
+        if not word:
+            continue
+        for pattern in patterns:
+            candidate = sanitize_azure_container_label(pattern.format(w=word))
+            if is_valid_azure_container_name(candidate):
+                candidates.add(candidate)
+
+    return candidates
+
+
+def build_bucket_wordlist(
+    context: ScanContext,
+    discovered_hosts: set[str],
+    *,
+    sanitize_bucket_label: Callable[[str], str],
+    extract_bucket_candidates_from_hosts: Callable[[set[str]], set[str]],
+) -> set[str]:
+    words: set[str] = set()
+
+    for domain in context.domains:
+        base = domain.split(".")[0]
+        words.add(sanitize_bucket_label(base))
+        words.add(sanitize_bucket_label(domain.replace(".", "-")))
+
+    if context.organization:
+        words.add(sanitize_bucket_label(context.organization.replace(" ", "-")))
+
+    for kw in context.keywords:
+        words.add(sanitize_bucket_label(kw))
+
+    words.update(extract_bucket_candidates_from_hosts(discovered_hosts))
+
+    patterns = [
+        "{w}",
+        "{w}-assets",
+        "{w}-backup",
+        "{w}-backups",
+        "{w}-data",
+        "{w}-public",
+        "{w}-static",
+        "{w}-media",
+        "{w}-cdn",
+        "{w}-files",
+        "{w}-uploads",
+    ]
+
+    candidates: set[str] = set()
+    for word in words:
+        if not word:
+            continue
+        for pattern in patterns:
+            candidate = sanitize_bucket_label(pattern.format(w=word))
+            if 3 <= len(candidate) <= 63:
+                candidates.add(candidate)
+
+    return candidates
+
+
+def parse_azure_error_code(headers: dict[str, str], body: str) -> str:
+    for key, value in headers.items():
+        if key.lower() == "x-ms-error-code" and value.strip():
+            return value.strip()
+
+    match = re.search(r"<Code>\s*([A-Za-z0-9]+)\s*</Code>", body)
+    if match:
+        return match.group(1).strip()
+    return ""
+
+
+def parse_s3_error_code(headers: dict[str, str], body: str) -> str:
+    for key, value in headers.items():
+        if key.lower() in {"x-amz-error-code", "x-amz-errorcode"} and value.strip():
+            return value.strip()
+
+    match = re.search(r"<Code>\s*([A-Za-z0-9]+)\s*</Code>", body)
+    if match:
+        return match.group(1).strip()
+    return ""
+
+
+def classify_azure_blob_status(
+    status: int,
+    error_code: str,
+    *,
+    azure_blob_likely_exists_error_codes: set[str],
+) -> str:
+    if status == 200:
+        return "confirmed_public"
+    if status in {401, 403}:
+        return "likely_exists"
+    if status == 409 and error_code in azure_blob_likely_exists_error_codes:
+        return "likely_exists"
+    return "unknown"
+
+
+def classify_s3_head_status(status: int, region: str) -> str:
+    if status == 200:
+        return "confirmed_exists"
+    if status in {301, 302, 307, 308, 403}:
+        return "likely_exists" if region else "unknown"
+    if status in {400, 404}:
+        return "unknown"
+    return "unknown"
+
+
+def probe_s3_list_access(
+    bucket: str,
+    timeout: int,
+    *,
+    fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
+    parse_s3_error_code: Callable[[dict[str, str], str], str],
+    cloud_probe_http_retries: int,
+) -> tuple[int, dict[str, str], str]:
+    url = f"https://{bucket}.s3.amazonaws.com/?list-type=2&max-keys=0"
+    status, body, headers = fetch_url(
+        url, timeout=timeout, method="GET", retries=cloud_probe_http_retries
+    )
+    return status, headers, parse_s3_error_code(headers, body)
+
+
+def probe_s3_object_access(
+    bucket: str,
+    timeout: int,
+    *,
+    fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
+    parse_s3_error_code: Callable[[dict[str, str], str], str],
+    cloud_probe_http_retries: int,
+) -> tuple[int, dict[str, str], str]:
+    probe_key = f"__subrecon_probe__{time_ns()}"
+    url = f"https://{bucket}.s3.amazonaws.com/{probe_key}"
+    status, body, headers = fetch_url(
+        url, timeout=timeout, method="GET", retries=cloud_probe_http_retries
+    )
+    return status, headers, parse_s3_error_code(headers, body)
+
+
+def check_single_bucket_exists(
+    bucket: str,
+    timeout: int,
+    s3_list_probe: bool = True,
+    *,
+    fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
+    classify_s3_head_status: Callable[[int, str], str],
+    probe_s3_list_access: Callable[[str, int], tuple[int, dict[str, str], str]],
+    probe_s3_object_access: Callable[[str, int], tuple[int, dict[str, str], str]],
+    cloud_probe_http_retries: int,
+) -> tuple[str, Optional[int], str, str, Optional[int]]:
+    url = f"https://{bucket}.s3.amazonaws.com/"
+    status, _, headers = fetch_url(
+        url, timeout=timeout, method="HEAD", retries=cloud_probe_http_retries
+    )
+
+    region = headers.get("x-amz-bucket-region") or headers.get("X-Amz-Bucket-Region")
+    existence = classify_s3_head_status(status, region or "")
+    list_status: Optional[int] = None
+
+    if s3_list_probe and existence == "unknown":
+        list_status, list_headers, _list_error_code = probe_s3_list_access(
+            bucket, timeout
+        )
+        if list_status == 200:
+            existence = "confirmed_exists"
+        elif list_status == 403:
+            existence = "likely_exists"
+        elif list_status in {301, 302, 307, 308}:
+            existence = "likely_exists"
+        if not region:
+            region = list_headers.get("x-amz-bucket-region") or list_headers.get(
+                "X-Amz-Bucket-Region"
+            )
+
+    if existence == "unknown":
+        object_status, object_headers, object_error_code = probe_s3_object_access(
+            bucket, timeout
+        )
+        if not region:
+            region = object_headers.get("x-amz-bucket-region") or object_headers.get(
+                "X-Amz-Bucket-Region"
+            )
+        if object_status == 200:
+            existence = "confirmed_exists"
+        elif object_status == 403 and object_error_code in {
+            "AccessDenied",
+            "AllAccessDisabled",
+        }:
+            existence = "likely_exists"
+        elif object_status == 404 and object_error_code == "NoSuchKey":
+            existence = "confirmed_exists"
+        elif object_status == 404 and object_error_code == "NoSuchBucket":
+            existence = "not_exists"
+
+    return bucket, status, existence, region or "", list_status
+
+
+def collect_s3_bucket_findings(
+    context: ScanContext,
+    hosts: set[str],
+    stats: dict[str, Any],
+    *,
+    build_bucket_wordlist: Callable[[ScanContext, set[str]], set[str]],
+    check_single_bucket_exists: Callable[
+        [str, int, bool], tuple[str, Optional[int], str, str, Optional[int]]
+    ],
+    log: Callable[[str, bool, bool], None],
+) -> list[Finding]:
+    findings: list[Finding] = []
+    candidates = sorted(build_bucket_wordlist(context, hosts))
+    if not candidates:
+        stats["status"] = "ok_no_candidates"
+        return findings
+
+    stats["queried"] = len(candidates)
+    if len(candidates) > context.max_bucket_candidates:
+        log(
+            "[s3] candidate list capped at "
+            f"{context.max_bucket_candidates} (from {len(candidates)})",
+            context.verbose,
+            force=True,
+        )
+        candidates = candidates[: context.max_bucket_candidates]
+        stats["queried"] = len(candidates)
+
+    log(f"[s3] checking {len(candidates)} bucket candidates", context.verbose)
+
+    checked = 0
+    ambiguous_signals = 0
+    suppressed_weak_likely = 0
+    with ThreadPoolExecutor(max_workers=context.threads) as pool:
+        futures = {
+            pool.submit(
+                check_single_bucket_exists,
+                bucket,
+                context.timeout,
+                context.s3_list_probe,
+            ): bucket
+            for bucket in candidates
+        }
+        for fut in as_completed(futures):
+            checked += 1
+            bucket = futures[fut]
+            try:
+                _, status, existence, region, list_status = fut.result()
+            except Exception:
+                record_source_error(
+                    stats,
+                    "s3_worker_exception",
+                    detail=f"bucket={bucket}",
+                )
+                continue
+
+            if context.verbose and checked % 50 == 0:
+                log(
+                    f"[s3] progress {checked}/{len(candidates)}",
+                    context.verbose,
+                )
+
+            if status is None or status == 0:
+                record_source_error(
+                    stats,
+                    "s3_probe_failed",
+                    detail=f"bucket={bucket} head_status={status}",
+                )
+                continue
+            if (
+                existence == "likely_exists"
+                and status in {400, 404}
+                and list_status == 403
+            ):
+                suppressed_weak_likely += 1
+                ambiguous_signals += 1
+                continue
+            if existence in {"not_exists", "unknown"}:
+                if existence == "unknown":
+                    ambiguous_signals += 1
+                continue
+
+            tags = ["cloud", "s3", "passive"]
+            if existence == "confirmed_exists":
+                severity = "medium"
+                confidence = "high"
+                if list_status == 200 and status != 200:
+                    title = "Publicly listable S3 bucket (anonymous probe)"
+                    description = (
+                        "Anonymous ListObjectsV2 probe succeeded (HTTP 200). "
+                        "Validate access controls and exposure in a permitted workflow."
+                    )
+                    tags.append("listable")
+                else:
+                    title = "Potentially public S3 bucket"
+                    description = (
+                        "Bucket endpoint returned HTTP 200. Validate access control in a "
+                        "permitted environment."
+                    )
+            elif existence == "likely_exists":
+                severity = "low"
+                confidence = "medium"
+                title = "S3 bucket name likely exists (HEAD signal)"
+                description = (
+                    "Bucket endpoint response strongly suggests the bucket name exists, "
+                    "but anonymous access is not available."
+                )
+                tags.append("likely-exists")
+            region_note = f" region={region}" if region else ""
+            list_note = (
+                f" list_probe_status={list_status}" if list_status is not None else ""
+            )
+            findings.append(
+                Finding(
+                    asset_type="s3_bucket",
+                    asset=bucket,
+                    severity=severity,
+                    confidence=confidence,
+                    title=title,
+                    description=description,
+                    source="aws-s3-head",
+                    tags=tags,
+                    evidence=[
+                        Evidence(
+                            source_url=f"https://{bucket}.s3.amazonaws.com/",
+                            note=(
+                                f"HEAD status={status}. existence={existence}.{region_note}"
+                                f"{list_note}"
+                            ),
+                        )
+                    ],
+                )
+            )
+
+    stats["ambiguous"] = ambiguous_signals
+    stats["suppressed_weak_likely"] = suppressed_weak_likely
+    stats["hosts"] = len(findings)
+    stats["findings"] = len(findings)
+    if stats["errors"]:
+        stats["status"] = "partial" if findings else "error"
+    elif findings:
+        stats["status"] = "ok"
+    else:
+        stats["status"] = "ok_no_results"
+
+    if not findings and ambiguous_signals:
+        print(
+            "    [s3] no confident bucket hits; responses were ambiguous "
+            f"for {ambiguous_signals}/{len(candidates)} candidates"
+        )
+        print(
+            "    [s3] note: unauthenticated HeadBucket may return generic 400/403/404 "
+            "that cannot confirm bucket existence"
+        )
+
+    return findings
+
+
+def classify_gcp_status(status: int) -> str:
+    if status == 200:
+        return "confirmed_exists"
+    if status in {301, 302, 307, 308, 401, 403}:
+        return "likely_exists"
+    if status in {400, 404}:
+        return "unknown"
+    return "unknown"
+
+
+def probe_gcp_list_access(
+    bucket: str,
+    timeout: int,
+    *,
+    fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
+    cloud_probe_http_retries: int,
+) -> int:
+    url = f"https://storage.googleapis.com/{bucket}/"
+    status, _, _ = fetch_url(
+        url, timeout=timeout, method="GET", retries=cloud_probe_http_retries
+    )
+    return status
+
+
+def check_single_gcp_bucket_exists(
+    bucket: str,
+    timeout: int,
+    *,
+    fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
+    classify_gcp_status: Callable[[int], str],
+    probe_gcp_list_access: Callable[[str, int], int],
+    cloud_probe_http_retries: int,
+) -> tuple[str, Optional[int], str, Optional[int]]:
+    url = f"https://storage.googleapis.com/{bucket}/"
+    status, _, _ = fetch_url(
+        url, timeout=timeout, method="HEAD", retries=cloud_probe_http_retries
+    )
+    existence = classify_gcp_status(status)
+    list_status: Optional[int] = None
+
+    if existence == "unknown":
+        list_status = probe_gcp_list_access(bucket, timeout)
+        if classify_gcp_status(list_status) != "unknown":
+            existence = classify_gcp_status(list_status)
+
+    return bucket, status, existence, list_status
+
+
+def collect_gcp_bucket_findings(
+    context: ScanContext,
+    hosts: set[str],
+    stats: dict[str, Any],
+    *,
+    build_bucket_wordlist: Callable[[ScanContext, set[str]], set[str]],
+    check_single_gcp_bucket_exists: Callable[
+        [str, int], tuple[str, Optional[int], str, Optional[int]]
+    ],
+    log: Callable[[str, bool, bool], None],
+) -> list[Finding]:
+    findings: list[Finding] = []
+    candidates = sorted(build_bucket_wordlist(context, hosts))
+    if not candidates:
+        stats["status"] = "ok_no_candidates"
+        return findings
+
+    stats["queried"] = len(candidates)
+    if len(candidates) > context.max_bucket_candidates:
+        log(
+            "[gcp] candidate list capped at "
+            f"{context.max_bucket_candidates} (from {len(candidates)})",
+            context.verbose,
+            force=True,
+        )
+        candidates = candidates[: context.max_bucket_candidates]
+        stats["queried"] = len(candidates)
+
+    checked = 0
+    ambiguous = 0
+    with ThreadPoolExecutor(max_workers=context.threads) as pool:
+        futures = {
+            pool.submit(check_single_gcp_bucket_exists, bucket, context.timeout): bucket
+            for bucket in candidates
+        }
+        for fut in as_completed(futures):
+            checked += 1
+            bucket = futures[fut]
+            try:
+                _, status, existence, list_status = fut.result()
+            except Exception:
+                record_source_error(
+                    stats,
+                    "gcp_worker_exception",
+                    detail=f"bucket={bucket}",
+                )
+                continue
+
+            if context.verbose and checked % 50 == 0:
+                log(f"[gcp] progress {checked}/{len(candidates)}", context.verbose)
+
+            if status is None or status == 0:
+                record_source_error(
+                    stats,
+                    "gcp_probe_failed",
+                    detail=f"bucket={bucket} head_status={status}",
+                )
+                continue
+            if existence in {"not_exists", "unknown"}:
+                ambiguous += 1
+                continue
+
+            tags = ["cloud", "gcp", "passive"]
+            if existence == "confirmed_exists":
+                severity = "medium"
+                confidence = "high"
+                if list_status == 200 and status != 200:
+                    title = "Publicly listable GCP bucket (anonymous probe)"
+                    description = (
+                        "Anonymous bucket listing probe succeeded (HTTP 200). "
+                        "Validate access controls in a permitted workflow."
+                    )
+                    tags.append("listable")
+                else:
+                    title = "Potentially public GCP bucket"
+                    description = (
+                        "Bucket endpoint returned HTTP 200. Validate access controls "
+                        "in a permitted environment."
+                    )
+            else:
+                severity = "low"
+                confidence = "medium"
+                title = "GCP bucket name likely exists (HTTP signal)"
+                description = (
+                    "Bucket endpoint response suggests the bucket name exists, "
+                    "but anonymous listing access is not available."
+                )
+                tags.append("likely-exists")
+
+            list_note = (
+                f" list_probe_status={list_status}" if list_status is not None else ""
+            )
+            findings.append(
+                Finding(
+                    asset_type="gcp_bucket",
+                    asset=bucket,
+                    severity=severity,
+                    confidence=confidence,
+                    title=title,
+                    description=description,
+                    source="gcp-storage-head",
+                    tags=tags,
+                    evidence=[
+                        Evidence(
+                            source_url=f"https://storage.googleapis.com/{bucket}/",
+                            note=f"HEAD status={status}. existence={existence}.{list_note}",
+                        )
+                    ],
+                )
+            )
+
+    stats["ambiguous"] = ambiguous
+    stats["hosts"] = len(findings)
+    stats["findings"] = len(findings)
+    if stats["errors"]:
+        stats["status"] = "partial" if findings else "error"
+    elif findings:
+        stats["status"] = "ok"
+    else:
+        stats["status"] = "ok_no_results"
+
+    return findings
+
+
+def check_single_azure_blob_container(
+    account: str,
+    container: str,
+    timeout: int,
+    *,
+    fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
+    parse_azure_error_code: Callable[[dict[str, str], str], str],
+    classify_azure_blob_status: Callable[[int, str], str],
+    azure_blob_api_version: str,
+    cloud_probe_http_retries: int,
+) -> tuple[str, str, int, str, str, str]:
+    url = (
+        f"https://{account}.blob.core.windows.net/{container}"
+        "?restype=container&comp=list&maxresults=1"
+    )
+    status, body, headers = fetch_url(
+        url, timeout=timeout, method="GET", retries=cloud_probe_http_retries
+    )
+    error_code = parse_azure_error_code(headers, body)
+    if error_code == "FeatureVersionMismatch":
+        status, body, headers = fetch_url(
+            url,
+            timeout=timeout,
+            method="GET",
+            headers={"x-ms-version": azure_blob_api_version},
+            retries=cloud_probe_http_retries,
+        )
+        error_code = parse_azure_error_code(headers, body)
+    existence = classify_azure_blob_status(status, error_code)
+    return account, container, status, existence, error_code, url
+
+
+def collect_azure_blob_findings(
+    context: ScanContext,
+    hosts: set[str],
+    stats: dict[str, Any],
+    *,
+    fetch_doh_cname_records: Callable[[str, int], tuple[int, list[str], str]],
+    extract_azure_storage_account_from_cname: Callable[[str], str],
+    build_azure_container_wordlist: Callable[[ScanContext, set[str]], set[str]],
+    check_single_azure_blob_container: Callable[
+        [str, str, int], tuple[str, str, int, str, str, str]
+    ],
+    azure_blob_reference_url: str,
+) -> list[Finding]:
+    findings: list[Finding] = []
+    if not hosts:
+        stats["status"] = "ok_no_results"
+        stats["notes"].append("no discovered hosts available for azure blob checks")
+        return findings
+
+    candidates = sorted(host for host in hosts if host and "." in host)
+    stats["candidate_hosts"] = len(candidates)
+    stats["doh_queries"] = len(candidates)
+    stats["queried"] = stats["doh_queries"]
+
+    account_to_hosts: dict[str, set[str]] = {}
+
+    def resolve_account_candidates(host: str) -> tuple[str, int, list[str], str]:
+        doh_status, cnames, doh_url = fetch_doh_cname_records(host, context.timeout)
+        accounts: set[str] = set()
+        for cname in cnames:
+            account = extract_azure_storage_account_from_cname(cname)
+            if account:
+                accounts.add(account)
+        return host, doh_status, sorted(accounts), doh_url
+
+    with ThreadPoolExecutor(max_workers=context.threads) as pool:
+        futures = {
+            pool.submit(resolve_account_candidates, host): host for host in candidates
+        }
+        for fut in as_completed(futures):
+            try:
+                host, doh_status, accounts, _doh_url = fut.result()
+            except Exception:
+                record_source_error(
+                    stats,
+                    "azure_doh_worker_exception",
+                    detail="unhandled exception resolving azure account candidates",
+                )
+                continue
+            if doh_status == 0:
+                record_source_error(
+                    stats,
+                    "azure_doh_failed",
+                    detail=f"host={host}",
+                )
+                continue
+            for account in accounts:
+                account_to_hosts.setdefault(account, set()).add(host)
+
+    if not account_to_hosts:
+        if stats["errors"]:
+            stats["status"] = "partial"
+        else:
+            stats["status"] = "ok_no_results"
+            stats["notes"].append("no azure blob storage CNAME targets found")
+        return findings
+
+    container_candidates = sorted(build_azure_container_wordlist(context, hosts))
+    if not container_candidates:
+        stats["status"] = "ok_no_candidates"
+        return findings
+
+    stats["storage_accounts"] = len(account_to_hosts)
+    stats["container_candidates"] = len(container_candidates)
+
+    probe_targets: list[tuple[str, str]] = []
+    for account in sorted(account_to_hosts):
+        for container in container_candidates:
+            if len(probe_targets) >= context.max_bucket_candidates:
+                break
+            probe_targets.append((account, container))
+        if len(probe_targets) >= context.max_bucket_candidates:
+            break
+    if len(account_to_hosts) * len(container_candidates) > len(probe_targets):
+        stats["notes"].append(
+            "azure blob probe target list capped by --max-bucket-candidates"
+        )
+    stats["probes"] = len(probe_targets)
+    stats["queried"] = stats["doh_queries"] + stats["probes"]
+
+    likely_exists = 0
+    with ThreadPoolExecutor(max_workers=context.threads) as pool:
+        futures = {
+            pool.submit(
+                check_single_azure_blob_container, account, container, context.timeout
+            ): (
+                account,
+                container,
+            )
+            for account, container in probe_targets
+        }
+        for fut in as_completed(futures):
+            account, container = futures[fut]
+            try:
+                _, _, status, existence, error_code, url = fut.result()
+            except Exception:
+                record_source_error(
+                    stats,
+                    "azure_probe_worker_exception",
+                    detail=f"account={account} container={container}",
+                )
+                continue
+
+            if status == 0:
+                record_source_error(
+                    stats,
+                    "azure_probe_failed",
+                    detail=f"account={account} container={container}",
+                )
+                continue
+
+            if existence == "likely_exists":
+                likely_exists += 1
+                continue
+
+            if existence != "confirmed_public":
+                continue
+
+            linked_hosts = sorted(account_to_hosts.get(account, set()))
+            source_hosts = ", ".join(linked_hosts[:5]) if linked_hosts else "unknown"
+            extra = "..." if len(linked_hosts) > 5 else ""
+            code_note = f"; x-ms-error-code={error_code}" if error_code else ""
+            findings.append(
+                Finding(
+                    asset_type="azure_blob_container",
+                    asset=f"{account}/{container}",
+                    severity="high",
+                    confidence="high",
+                    title="Publicly listable Azure Blob container",
+                    description=(
+                        "Anonymous List Blobs request succeeded (HTTP 200). "
+                        "Validate public access policy and exposed data in an authorized workflow."
+                    ),
+                    source="azure-blob-list",
+                    tags=["cloud", "azure", "blob", "passive", "listable"],
+                    evidence=[
+                        Evidence(
+                            source_url=url,
+                            note=f"GET status={status}. existence={existence}{code_note}",
+                        ),
+                        Evidence(
+                            source_url=f"https://{account}.blob.core.windows.net/",
+                            note=(
+                                "Storage account inferred from discovered host CNAME(s): "
+                                f"{source_hosts}{extra}"
+                            ),
+                        ),
+                        Evidence(
+                            source_url=azure_blob_reference_url,
+                            note=(
+                                "Azure Blob public-access behavior reference "
+                                "(list/properties probing patterns)."
+                            ),
+                        ),
+                    ],
+                )
+            )
+
+    stats["likely_exists"] = likely_exists
+    stats["hosts"] = len(findings)
+    stats["findings"] = len(findings)
+    if stats["errors"]:
+        stats["status"] = "partial" if findings else "error"
+    elif findings:
+        stats["status"] = "ok"
+    else:
+        stats["status"] = "ok_no_results"
+
+    return findings

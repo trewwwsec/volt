@@ -2,417 +2,234 @@
 
 import argparse
 import json
-import re
-import shutil
-import subprocess
-import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
 from datetime import datetime, timezone
-from html import unescape
-from pathlib import Path
+from time import sleep
 from typing import Any, Optional
 from urllib import error, parse, request
 
-from subrecon_models import Evidence, Finding, ScanContext
-from subrecon_reporting import dedupe_findings, finding_sort_key, make_summary
-
-DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (compatible; subrecon-passive/1.0; +https://github.com/)"
+from parsing import (
+    extract_host_from_value as extract_host_from_value_source,
+    extract_source_names as extract_source_names_source,
+    iter_json_records as iter_json_records_source,
+    parse_amass_structured_output as parse_amass_structured_output_source,
+    parse_hosts_from_output as parse_hosts_from_output_source,
+    parse_structured_hosts_with_sources as parse_structured_hosts_with_sources_source,
+    parse_subfinder_structured_output as parse_subfinder_structured_output_source,
+    score_provenance_confidence as score_provenance_confidence_source,
 )
-SUPPORTED_SEARCH_PROVIDERS = {"bing", "commoncrawl"}
-TAKEOVER_REFERENCE_URL = "https://github.com/EdOverflow/can-i-take-over-xyz"
-TAKEOVER_SIGNATURES: list[dict[str, Any]] = [
-    {
-        "provider": "Read the Docs",
-        "cname_suffixes": ["readthedocs.io"],
-        "fingerprints": ["The link you have followed or the URL that you entered does not exist."],
-        "severity": "high",
-        "confidence": "high",
-        "edge_case": False,
-    },
-    {
-        "provider": "Bitbucket",
-        "cname_suffixes": ["bitbucket.io"],
-        "fingerprints": ["Repository not found"],
-        "severity": "high",
-        "confidence": "high",
-        "edge_case": False,
-    },
-    {
-        "provider": "Help Scout Docs",
-        "cname_suffixes": ["helpscoutdocs.com"],
-        "fingerprints": ["No settings were found for this company:"],
-        "severity": "high",
-        "confidence": "high",
-        "edge_case": False,
-    },
-    {
-        "provider": "Surge",
-        "cname_suffixes": ["surge.sh", "na-west1.surge.sh"],
-        "fingerprints": ["project not found"],
-        "severity": "high",
-        "confidence": "high",
-        "edge_case": False,
-    },
-    {
-        "provider": "GitHub Pages",
-        "cname_suffixes": ["github.io"],
-        "fingerprints": ["There isn't a GitHub Pages site here."],
-        "severity": "medium",
-        "confidence": "low",
-        "edge_case": True,
-    },
-]
+from cli import build_parser as build_parser_source
+from cli import load_domains as load_domains_source
+from cli import main as main_source
+from cli import parse_keywords as parse_keywords_source
+from cli import parse_search_providers as parse_search_providers_source
+from cli import positive_int as positive_int_source
+from cli import run_scan as run_scan_source
+from constants import (
+    AMASS_JSON_UNSUPPORTED_ERROR,
+    AMASS_SRC_UNSUPPORTED_ERROR,
+    AZURE_BLOB_API_VERSION,
+    AZURE_BLOB_CNAME_SUFFIXES,
+    AZURE_BLOB_LIKELY_EXISTS_ERROR_CODES,
+    AZURE_BLOB_REFERENCE_URL,
+    CT_HTTP_RETRIES,
+    CLOUD_PROBE_HTTP_RETRIES,
+    DEFAULT_HTTP_RETRIES,
+    DEFAULT_USER_AGENT,
+    HTTP_BACKOFF_BASE_SECONDS,
+    HTTP_RETRYABLE_STATUS_CODES,
+    SEARCH_HTTP_RETRIES,
+    SUPPORTED_SEARCH_PROVIDERS,
+    TAKEOVER_HTTP_RETRIES,
+    TAKEOVER_REFERENCE_URL,
+    TAKEOVER_SIGNATURES,
+)
+from core import check_tool as check_tool_source
+from core import init_source_health as init_source_health_source
+from core import log as log_source
+from core import normalize_domain as normalize_domain_source
+from core import normalize_source_health as normalize_source_health_source
+from core import record_source_error as record_source_error_source
+from core import run_command as run_command_source
+from networking import fetch_url as fetch_url_source
+from sources.ct import collect_ct_subdomains as collect_ct_subdomains_source
+from sources.search import (
+    build_commoncrawl_patterns as build_commoncrawl_patterns_source,
+    build_dork_queries as build_dork_queries_source,
+    classify_leak as classify_leak_source,
+    collect_search_index_findings as collect_search_index_findings_source,
+    fetch_commoncrawl_index_endpoint as fetch_commoncrawl_index_endpoint_source,
+    fetch_commoncrawl_results as fetch_commoncrawl_results_source,
+    parse_bing_results as parse_bing_results_source,
+)
+from sources.storage import (
+    build_azure_container_wordlist as build_azure_container_wordlist_source,
+    build_bucket_wordlist as build_bucket_wordlist_source,
+    check_single_azure_blob_container as check_single_azure_blob_container_source,
+    check_single_bucket_exists as check_single_bucket_exists_source,
+    check_single_gcp_bucket_exists as check_single_gcp_bucket_exists_source,
+    classify_azure_blob_status as classify_azure_blob_status_source,
+    classify_gcp_status as classify_gcp_status_source,
+    classify_s3_head_status as classify_s3_head_status_source,
+    collect_azure_blob_findings as collect_azure_blob_findings_source,
+    collect_gcp_bucket_findings as collect_gcp_bucket_findings_source,
+    collect_s3_bucket_findings as collect_s3_bucket_findings_source,
+    extract_azure_storage_account_from_cname as extract_azure_storage_account_from_cname_source,
+    extract_bucket_candidates_from_hosts as extract_bucket_candidates_from_hosts_source,
+    is_valid_azure_container_name as is_valid_azure_container_name_source,
+    parse_azure_error_code as parse_azure_error_code_source,
+    parse_s3_error_code as parse_s3_error_code_source,
+    probe_gcp_list_access as probe_gcp_list_access_source,
+    probe_s3_object_access as probe_s3_object_access_source,
+    probe_s3_list_access as probe_s3_list_access_source,
+    sanitize_azure_container_label as sanitize_azure_container_label_source,
+    sanitize_bucket_label as sanitize_bucket_label_source,
+)
+from sources.takeover import (
+    collect_subdomain_takeover_findings as collect_subdomain_takeover_findings_source,
+    fetch_doh_cname_records as fetch_doh_cname_records_source,
+    match_takeover_fingerprint as match_takeover_fingerprint_source,
+    match_takeover_signature as match_takeover_signature_source,
+    probe_takeover_endpoint as probe_takeover_endpoint_source,
+)
+from sources.tools import (
+    collect_amass_subdomains as collect_amass_subdomains_source,
+    collect_subfinder_subdomains as collect_subfinder_subdomains_source,
+)
+from models import Finding, ScanContext
+from reporting import dedupe_findings, finding_sort_key, make_summary
 
 
 def log(msg: str, verbose: bool = False, force: bool = False) -> None:
-    if force or verbose:
-        print(msg)
+    return log_source(msg, verbose, force)
 
 
 def init_source_health(name: str, enabled: bool = True) -> dict[str, Any]:
-    return {
-        "name": name,
-        "enabled": enabled,
-        "status": "disabled" if not enabled else "ok",
-        "queried": 0,
-        "hosts": 0,
-        "findings": 0,
-        "errors": 0,
-        "timeouts": 0,
-        "notes": [],
-    }
+    return init_source_health_source(name, enabled)
 
 
 def normalize_domain(value: str) -> str:
-    return value.strip().lower().lstrip(".")
+    return normalize_domain_source(value)
+
+
+def normalize_source_health(source_health: dict[str, dict[str, Any]]) -> None:
+    return normalize_source_health_source(source_health)
+
+
+def record_source_error(
+    stats: dict[str, Any],
+    code: str,
+    detail: str = "",
+    *,
+    timeout: bool = False,
+    max_samples: int = 20,
+) -> None:
+    return record_source_error_source(
+        stats,
+        code,
+        detail,
+        timeout=timeout,
+        max_samples=max_samples,
+    )
 
 
 def check_tool(name: str) -> bool:
-    return shutil.which(name) is not None
+    return check_tool_source(name)
 
 
 def run_command(cmd: list[str], timeout: int) -> tuple[int, str, str]:
-    try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout if isinstance(exc.stdout, str) else ""
-        stderr = exc.stderr if isinstance(exc.stderr, str) else ""
-        return 124, stdout, stderr
-    except Exception as exc:
-        return 1, "", str(exc)
-
-    return proc.returncode, proc.stdout, proc.stderr
+    return run_command_source(cmd, timeout)
 
 
 def parse_hosts_from_output(raw: str, domain: str) -> set[str]:
-    out: set[str] = set()
-    for line in raw.splitlines():
-        host = normalize_domain(line.replace("*.", ""))
-        if not host:
-            continue
-        if host == domain or host.endswith(f".{domain}"):
-            out.add(host)
-    return out
+    return parse_hosts_from_output_source(
+        raw,
+        domain,
+        normalize_domain=normalize_domain,
+    )
 
 
 def extract_host_from_value(value: Any) -> str:
-    if not isinstance(value, str):
-        return ""
-    candidate = value.strip()
-    if not candidate:
-        return ""
-    if "://" in candidate:
-        parsed = parse.urlparse(candidate)
-        if parsed.hostname:
-            return normalize_domain(parsed.hostname)
-    candidate = candidate.split("/", 1)[0]
-    return normalize_domain(candidate.replace("*.", ""))
+    return extract_host_from_value_source(
+        value,
+        normalize_domain=normalize_domain,
+        urlparse=parse.urlparse,
+    )
 
 
 def extract_source_names(record: dict[str, Any]) -> set[str]:
-    out: set[str] = set()
-
-    def add_source(value: Any) -> None:
-        if not isinstance(value, str):
-            return
-        normalized = re.sub(r"\s+", " ", value.strip().lower())
-        if normalized:
-            out.add(normalized)
-
-    for key in ("source", "src"):
-        add_source(record.get(key))
-
-    for key in ("sources",):
-        value = record.get(key)
-        if isinstance(value, str):
-            add_source(value)
-        elif isinstance(value, list):
-            for item in value:
-                if isinstance(item, str):
-                    add_source(item)
-                elif isinstance(item, dict):
-                    for nested_key in ("name", "source", "id"):
-                        if nested_key in item:
-                            add_source(item.get(nested_key))
-                            break
-
-    tag = record.get("tag")
-    if isinstance(tag, str) and tag.strip():
-        out.add(f"tag:{tag.strip().lower()}")
-
-    return out
+    return extract_source_names_source(record)
 
 
 def iter_json_records(raw: str) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    text = raw.strip()
-    if not text:
-        return records
-
-    if text.startswith("[") and text.endswith("]"):
-        try:
-            parsed = json.loads(text)
-            if isinstance(parsed, list):
-                for item in parsed:
-                    if isinstance(item, dict):
-                        records.append(item)
-            return records
-        except json.JSONDecodeError:
-            pass
-
-    for line in raw.splitlines():
-        candidate = line.strip()
-        if not candidate or not candidate.startswith("{"):
-            continue
-        try:
-            parsed = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            records.append(parsed)
-
-    return records
+    return iter_json_records_source(raw, json_loads=json.loads)
 
 
 def parse_structured_hosts_with_sources(
     raw: str, domain: str, host_keys: tuple[str, ...]
 ) -> dict[str, set[str]]:
-    host_sources: dict[str, set[str]] = {}
-    for record in iter_json_records(raw):
-        host = ""
-        for key in host_keys:
-            host = extract_host_from_value(record.get(key))
-            if host:
-                break
-        if not host:
-            continue
-        if not (host == domain or host.endswith(f".{domain}")):
-            continue
-        host_sources.setdefault(host, set()).update(extract_source_names(record))
-    return host_sources
+    return parse_structured_hosts_with_sources_source(
+        raw,
+        domain,
+        host_keys,
+        iter_json_records=iter_json_records,
+        extract_host_from_value=extract_host_from_value,
+        extract_source_names=extract_source_names,
+    )
 
 
 def parse_subfinder_structured_output(raw: str, domain: str) -> dict[str, set[str]]:
-    return parse_structured_hosts_with_sources(raw, domain, ("host", "url", "input", "name"))
+    return parse_subfinder_structured_output_source(
+        raw,
+        domain,
+        parse_structured_hosts_with_sources=parse_structured_hosts_with_sources,
+    )
 
 
 def parse_amass_structured_output(raw: str, domain: str) -> dict[str, set[str]]:
-    return parse_structured_hosts_with_sources(raw, domain, ("name", "host", "hostname", "domain"))
+    return parse_amass_structured_output_source(
+        raw,
+        domain,
+        parse_structured_hosts_with_sources=parse_structured_hosts_with_sources,
+    )
 
 
 def score_provenance_confidence(sources: set[str]) -> str:
-    source_count = len([src for src in sources if not src.startswith("tag:")])
-    if source_count >= 3:
-        return "high"
-    if source_count >= 1:
-        return "medium"
-    return "low"
+    return score_provenance_confidence_source(sources)
 
 
 def collect_subfinder_subdomains(
     context: ScanContext, health: Optional[dict[str, Any]] = None
 ) -> tuple[set[str], list[Finding]]:
     stats = health if health is not None else init_source_health("subfinder")
-    if not check_tool("subfinder"):
-        log("[subfinder] tool not found; skipping", context.verbose)
-        stats["status"] = "skipped_tool_missing"
-        stats["notes"].append("subfinder not installed")
-        return set(), []
-
-    hosts: set[str] = set()
-    host_sources: dict[str, set[str]] = {}
-    structured_domains = 0
-    fallback_domains = 0
-    for domain in context.domains:
-        stats["queried"] += 1
-        rc, stdout, stderr = run_command(
-            ["subfinder", "-d", domain, "-silent", "-oJ", "-cs"],
-            timeout=context.tool_timeout,
-        )
-        structured = parse_subfinder_structured_output(stdout, domain)
-        if structured:
-            structured_domains += 1
-            parsed = set(structured.keys())
-            for host, sources in structured.items():
-                host_sources.setdefault(host, set()).update(sources)
-        else:
-            fallback_domains += 1
-            parsed = parse_hosts_from_output(stdout, domain)
-            for host in parsed:
-                host_sources.setdefault(host, set())
-        hosts.update(parsed)
-
-        if rc == 124 and not parsed:
-            stats["timeouts"] += 1
-            print(
-                f"    [subfinder] {domain}: timed out after {context.tool_timeout}s "
-                "(try increasing --tool-timeout)"
-            )
-            continue
-        if rc != 0 and not parsed:
-            stats["errors"] += 1
-            err = (stderr or "").strip().splitlines()
-            detail = err[-1] if err else "unknown error"
-            print(f"    [subfinder] {domain}: command failed (rc={rc}) - {detail}")
-        elif rc != 0 and parsed:
-            log(
-                f"[subfinder] {domain}: rc={rc}, parsed {len(parsed)} hosts from partial output",
-                context.verbose,
-            )
-
-        if rc == 0 and context.verbose:
-            log(f"[subfinder] {domain}: parsed {len(parsed)} hosts", context.verbose)
-
-
-    findings: list[Finding] = []
-    for host in sorted(hosts):
-        sources = sorted(host_sources.get(host, set()))
-        confidence = score_provenance_confidence(set(sources))
-        source_note = "No upstream source metadata returned."
-        if sources:
-            source_note = f"{len(sources)} passive sources: {', '.join(sources[:8])}"
-        findings.append(
-            Finding(
-                asset_type="subdomain",
-                asset=host,
-                severity="info",
-                confidence=confidence,
-                title="Subdomain discovered by passive source aggregator",
-                description="Discovered by subfinder in passive mode with source provenance.",
-                source="subfinder",
-                tags=["inventory", "passive", "provenance"],
-                evidence=[
-                    Evidence(
-                        source_url="https://github.com/projectdiscovery/subfinder",
-                        note=source_note,
-                    )
-                ],
-            )
-        )
-    stats["hosts"] = len(hosts)
-    stats["findings"] = len(findings)
-    stats["structured_domains"] = structured_domains
-    stats["fallback_domains"] = fallback_domains
-    if stats["timeouts"] or stats["errors"]:
-        stats["status"] = "partial" if hosts else "error"
-    return hosts, findings
+    return collect_subfinder_subdomains_source(
+        context,
+        stats,
+        check_tool=check_tool,
+        run_command=run_command,
+        parse_subfinder_structured_output=parse_subfinder_structured_output,
+        parse_hosts_from_output=parse_hosts_from_output,
+        score_provenance_confidence=score_provenance_confidence,
+        log=log,
+    )
 
 
 def collect_amass_subdomains(
     context: ScanContext, health: Optional[dict[str, Any]] = None
 ) -> tuple[set[str], list[Finding]]:
     stats = health if health is not None else init_source_health("amass")
-    if not check_tool("amass"):
-        log("[amass] tool not found; skipping", context.verbose)
-        stats["status"] = "skipped_tool_missing"
-        stats["notes"].append("amass not installed")
-        return set(), []
-
-    hosts: set[str] = set()
-    host_sources: dict[str, set[str]] = {}
-    structured_domains = 0
-    fallback_domains = 0
-    for domain in context.domains:
-        stats["queried"] += 1
-        rc, stdout, stderr = run_command(
-            ["amass", "enum", "-passive", "-d", domain, "-src", "-json", "/dev/stdout"],
-            timeout=context.tool_timeout,
-        )
-        structured = parse_amass_structured_output(stdout, domain)
-        if structured:
-            structured_domains += 1
-            parsed = set(structured.keys())
-            for host, sources in structured.items():
-                host_sources.setdefault(host, set()).update(sources)
-        else:
-            fallback_domains += 1
-            parsed = parse_hosts_from_output(stdout, domain)
-            for host in parsed:
-                host_sources.setdefault(host, set())
-        hosts.update(parsed)
-
-        if rc == 124 and not parsed:
-            stats["timeouts"] += 1
-            print(
-                f"    [amass] {domain}: timed out after {context.tool_timeout}s "
-                "(try increasing --tool-timeout)"
-            )
-            continue
-        if rc != 0 and not parsed:
-            stats["errors"] += 1
-            err = (stderr or "").strip().splitlines()
-            detail = err[-1] if err else "unknown error"
-            print(f"    [amass] {domain}: command failed (rc={rc}) - {detail}")
-        elif rc != 0 and parsed:
-            log(
-                f"[amass] {domain}: rc={rc}, parsed {len(parsed)} hosts from partial output",
-                context.verbose,
-            )
-
-        if rc == 0 and context.verbose:
-            log(f"[amass] {domain}: parsed {len(parsed)} hosts", context.verbose)
-
-
-    findings: list[Finding] = []
-    for host in sorted(hosts):
-        sources = sorted(host_sources.get(host, set()))
-        confidence = score_provenance_confidence(set(sources))
-        source_note = "No upstream source metadata returned."
-        if sources:
-            source_note = f"{len(sources)} passive sources: {', '.join(sources[:8])}"
-        findings.append(
-            Finding(
-                asset_type="subdomain",
-                asset=host,
-                severity="info",
-                confidence=confidence,
-                title="Subdomain discovered by passive DNS intelligence",
-                description="Discovered by amass passive mode with source provenance.",
-                source="amass",
-                tags=["inventory", "passive", "provenance"],
-                evidence=[
-                    Evidence(
-                        source_url="https://github.com/owasp-amass/amass",
-                        note=source_note,
-                    )
-                ],
-            )
-        )
-    stats["hosts"] = len(hosts)
-    stats["findings"] = len(findings)
-    stats["structured_domains"] = structured_domains
-    stats["fallback_domains"] = fallback_domains
-    if stats["timeouts"] or stats["errors"]:
-        stats["status"] = "partial" if hosts else "error"
-    return hosts, findings
+    return collect_amass_subdomains_source(
+        context,
+        stats,
+        check_tool=check_tool,
+        run_command=run_command,
+        parse_amass_structured_output=parse_amass_structured_output,
+        parse_hosts_from_output=parse_hosts_from_output,
+        score_provenance_confidence=score_provenance_confidence,
+        log=log,
+        amass_src_unsupported_error=AMASS_SRC_UNSUPPORTED_ERROR,
+        amass_json_unsupported_error=AMASS_JSON_UNSUPPORTED_ERROR,
+    )
 
 
 def fetch_url(
@@ -420,1162 +237,433 @@ def fetch_url(
     timeout: int,
     method: str = "GET",
     headers: Optional[dict[str, str]] = None,
+    retries: int = DEFAULT_HTTP_RETRIES,
 ) -> tuple[int, str, dict[str, str]]:
-    req_headers = {"User-Agent": DEFAULT_USER_AGENT}
-    if headers:
-        req_headers.update(headers)
+    return fetch_url_source(
+        url,
+        timeout,
+        method=method,
+        headers=headers,
+        retries=retries,
+        default_user_agent=DEFAULT_USER_AGENT,
+        http_retryable_status_codes=HTTP_RETRYABLE_STATUS_CODES,
+        http_backoff_base_seconds=HTTP_BACKOFF_BASE_SECONDS,
+        request_module=request,
+        error_module=error,
+        sleep_fn=sleep,
+    )
 
-    req = request.Request(url, headers=req_headers, method=method)
 
-    try:
-        with request.urlopen(req, timeout=timeout) as resp:
-            body = ""
-            if method != "HEAD":
-                body = resp.read().decode("utf-8", errors="replace")
-            return resp.status, body, dict(resp.headers.items())
-    except error.HTTPError as exc:
-        body = ""
-        if method != "HEAD":
-            try:
-                body = exc.read().decode("utf-8", errors="replace")
-            except Exception:
-                body = ""
-        return exc.code, body, dict(exc.headers.items()) if exc.headers else {}
-    except error.URLError:
-        return 0, "", {}
-    except Exception:
-        return 0, "", {}
+def fetch_url_ct(
+    url: str,
+    timeout: int,
+    method: str = "GET",
+    headers: Optional[dict[str, str]] = None,
+    retries: int = CT_HTTP_RETRIES,
+) -> tuple[int, str, dict[str, str]]:
+    return fetch_url(
+        url,
+        timeout,
+        method=method,
+        headers=headers,
+        retries=retries,
+    )
+
+
+def fetch_url_search(
+    url: str,
+    timeout: int,
+    method: str = "GET",
+    headers: Optional[dict[str, str]] = None,
+    retries: int = SEARCH_HTTP_RETRIES,
+) -> tuple[int, str, dict[str, str]]:
+    return fetch_url(
+        url,
+        timeout,
+        method=method,
+        headers=headers,
+        retries=retries,
+    )
+
+
+def fetch_url_takeover(
+    url: str,
+    timeout: int,
+    method: str = "GET",
+    headers: Optional[dict[str, str]] = None,
+    retries: int = TAKEOVER_HTTP_RETRIES,
+) -> tuple[int, str, dict[str, str]]:
+    return fetch_url(
+        url,
+        timeout,
+        method=method,
+        headers=headers,
+        retries=retries,
+    )
 
 
 def fetch_doh_cname_records(host: str, timeout: int) -> tuple[int, list[str], str]:
-    query_url = f"https://dns.google/resolve?name={parse.quote_plus(host)}&type=CNAME"
-    status, body, _ = fetch_url(
-        query_url,
-        timeout=timeout,
-        headers={"Accept": "application/dns-json"},
+    return fetch_doh_cname_records_source(
+        host,
+        timeout,
+        fetch_url=fetch_url_takeover,
+        normalize_domain=normalize_domain,
+        quote_plus=parse.quote_plus,
+        json_loads=json.loads,
     )
-    if status != 200 or not body.strip():
-        return status, [], query_url
-
-    try:
-        payload = json.loads(body)
-    except json.JSONDecodeError:
-        return status, [], query_url
-
-    answers = payload.get("Answer")
-    if not isinstance(answers, list):
-        return status, [], query_url
-
-    cnames: set[str] = set()
-    for answer in answers:
-        if not isinstance(answer, dict):
-            continue
-        data = answer.get("data")
-        if not isinstance(data, str):
-            continue
-        cname = normalize_domain(data.rstrip("."))
-        if cname:
-            cnames.add(cname)
-    return status, sorted(cnames), query_url
 
 
 def match_takeover_signature(cnames: list[str]) -> tuple[Optional[dict[str, Any]], str]:
-    for cname in cnames:
-        for signature in TAKEOVER_SIGNATURES:
-            suffixes = signature.get("cname_suffixes", [])
-            if not isinstance(suffixes, list):
-                continue
-            for raw_suffix in suffixes:
-                if not isinstance(raw_suffix, str):
-                    continue
-                suffix = normalize_domain(raw_suffix.rstrip("."))
-                if not suffix:
-                    continue
-                if cname == suffix or cname.endswith(f".{suffix}"):
-                    return signature, cname
-    return None, ""
+    return match_takeover_signature_source(
+        cnames,
+        takeover_signatures=TAKEOVER_SIGNATURES,
+        normalize_domain=normalize_domain,
+    )
 
 
 def probe_takeover_endpoint(host: str, timeout: int) -> tuple[str, int, str]:
-    for scheme in ("https", "http"):
-        url = f"{scheme}://{host}/"
-        status, body, _ = fetch_url(url, timeout=timeout)
-        if status != 0:
-            return url, status, body
-    return f"https://{host}/", 0, ""
+    return probe_takeover_endpoint_source(
+        host,
+        timeout,
+        fetch_url=fetch_url_takeover,
+    )
 
 
 def match_takeover_fingerprint(
     body: str, status: int, signature: dict[str, Any]
 ) -> Optional[str]:
-    candidates = signature.get("fingerprints", [])
-    if not isinstance(candidates, list):
-        candidates = []
-    body_lower = body.lower()
-    for candidate in candidates:
-        if not isinstance(candidate, str):
-            continue
-        if candidate.lower() in body_lower:
-            return candidate
-    expected_status = signature.get("http_status")
-    if isinstance(expected_status, int) and expected_status == status:
-        return f"http_status={status}"
-    return None
+    return match_takeover_fingerprint_source(body, status, signature)
 
 
 def collect_subdomain_takeover_findings(
     context: ScanContext, hosts: set[str], health: Optional[dict[str, Any]] = None
 ) -> list[Finding]:
     stats = health if health is not None else init_source_health("takeover")
-    findings: list[Finding] = []
-    if not hosts:
-        stats["status"] = "ok_no_results"
-        stats["notes"].append("no discovered hosts available for takeover checks")
-        return findings
-
-    candidates = sorted(host for host in hosts if host and "." in host)
-    stats["queried"] = len(candidates)
-
-    def evaluate(host: str) -> tuple[str, Optional[dict[str, Any]]]:
-        doh_status, cnames, doh_url = fetch_doh_cname_records(host, context.timeout)
-        if doh_status == 0:
-            return "doh_error", {"host": host}
-        if not cnames:
-            return "no_cname", {"host": host, "doh_url": doh_url}
-
-        signature, matched_cname = match_takeover_signature(cnames)
-        if not signature:
-            return "no_signature_match", {"host": host, "doh_url": doh_url}
-
-        probe_url, probe_status, body = probe_takeover_endpoint(host, context.timeout)
-        if probe_status == 0:
-            return "probe_error", {"host": host, "doh_url": doh_url, "matched_cname": matched_cname}
-
-        fingerprint = match_takeover_fingerprint(body, probe_status, signature)
-        if not fingerprint:
-            return "no_fingerprint_match", {
-                "host": host,
-                "doh_url": doh_url,
-                "matched_cname": matched_cname,
-                "probe_url": probe_url,
-                "probe_status": probe_status,
-            }
-
-        return "confirmed", {
-            "host": host,
-            "doh_url": doh_url,
-            "cnames": cnames,
-            "matched_cname": matched_cname,
-            "probe_url": probe_url,
-            "probe_status": probe_status,
-            "fingerprint": fingerprint,
-            "signature": signature,
-        }
-
-    matched_cname_hosts = 0
-    edge_case_hits = 0
-    with ThreadPoolExecutor(max_workers=context.threads) as pool:
-        futures = {pool.submit(evaluate, host): host for host in candidates}
-        for fut in as_completed(futures):
-            try:
-                state, data = fut.result()
-            except Exception:
-                stats["errors"] += 1
-                continue
-
-            if state == "doh_error":
-                stats["errors"] += 1
-                continue
-            if state == "probe_error":
-                stats["errors"] += 1
-                matched_cname_hosts += 1
-                continue
-            if state != "confirmed" or data is None:
-                if state in {"no_fingerprint_match"}:
-                    matched_cname_hosts += 1
-                continue
-
-            signature = data["signature"]
-            provider = str(signature.get("provider", "Unknown provider"))
-            edge_case = bool(signature.get("edge_case"))
-            if edge_case:
-                edge_case_hits += 1
-
-            matched_cname_hosts += 1
-            title = f"Potential subdomain takeover via {provider}"
-            if edge_case:
-                title = f"Potential subdomain takeover signal via {provider} (edge case)"
-
-            findings.append(
-                Finding(
-                    asset_type="subdomain_takeover",
-                    asset=str(data["host"]),
-                    severity=str(signature.get("severity", "medium")),
-                    confidence=str(signature.get("confidence", "medium")),
-                    title=title,
-                    description=(
-                        "CNAME points to a known takeover-prone provider and the landing page "
-                        "matched an unclaimed-service fingerprint."
-                    ),
-                    source="takeover-fingerprint",
-                    tags=[
-                        "passive",
-                        "takeover",
-                        sanitize_bucket_label(provider.replace(" ", "-")),
-                        *(["edge-case"] if edge_case else []),
-                    ],
-                    evidence=[
-                        Evidence(
-                            source_url=str(data["doh_url"]),
-                            note=(
-                                f"CNAME chain: {', '.join(data['cnames'][:5])}; "
-                                f"matched={data['matched_cname']}"
-                            ),
-                        ),
-                        Evidence(
-                            source_url=str(data["probe_url"]),
-                            note=(
-                                f"HTTP status={data['probe_status']}; "
-                                f"matched fingerprint='{data['fingerprint']}'"
-                            ),
-                        ),
-                        Evidence(
-                            source_url=TAKEOVER_REFERENCE_URL,
-                            note="Provider fingerprint reference dataset.",
-                        ),
-                    ],
-                )
-            )
-
-    stats["candidate_hosts"] = len(candidates)
-    stats["cname_matches"] = matched_cname_hosts
-    stats["edge_case_hits"] = edge_case_hits
-    stats["hosts"] = len(findings)
-    stats["findings"] = len(findings)
-    if stats["errors"]:
-        stats["status"] = "partial" if findings else "error"
-    elif findings:
-        stats["status"] = "ok"
-    else:
-        stats["status"] = "ok_no_results"
-    return findings
+    return collect_subdomain_takeover_findings_source(
+        context,
+        hosts,
+        stats,
+        fetch_doh_cname_records=fetch_doh_cname_records,
+        match_takeover_signature=match_takeover_signature,
+        probe_takeover_endpoint=probe_takeover_endpoint,
+        match_takeover_fingerprint=match_takeover_fingerprint,
+        sanitize_bucket_label=sanitize_bucket_label,
+        takeover_reference_url=TAKEOVER_REFERENCE_URL,
+    )
 
 
 def collect_ct_subdomains(
     context: ScanContext, health: Optional[dict[str, Any]] = None
 ) -> tuple[set[str], list[Finding]]:
     stats = health if health is not None else init_source_health("crt.sh")
-    findings: list[Finding] = []
-    discovered: set[str] = set()
-
-    for domain in context.domains:
-        stats["queried"] += 1
-        query = parse.quote(f"%.{domain}")
-        url = f"https://crt.sh/?q={query}&output=json"
-
-        status, body, _ = fetch_url(url, timeout=context.timeout)
-        if status != 200 or not body.strip():
-            stats["errors"] += 1
-            log(f"[ct] {domain}: no data (status={status})", context.verbose)
-            continue
-
-        try:
-            rows = json.loads(body)
-        except json.JSONDecodeError:
-            stats["errors"] += 1
-            log(f"[ct] {domain}: failed to parse ct json", context.verbose)
-            continue
-
-        for row in rows:
-            names = str(row.get("name_value", "")).splitlines()
-            for name in names:
-                host = normalize_domain(name.replace("*.", ""))
-                if not host:
-                    continue
-                if host == domain or host.endswith(f".{domain}"):
-                    discovered.add(host)
-
-        log(f"[ct] {domain}: {len(discovered)} cumulative hosts", context.verbose)
-
-    for host in sorted(discovered):
-        findings.append(
-            Finding(
-                asset_type="subdomain",
-                asset=host,
-                severity="info",
-                confidence="high",
-                title="Subdomain discovered in CT logs",
-                description="Found in public certificate transparency records.",
-                source="crt.sh",
-                tags=["inventory", "ct-log", "passive"],
-                evidence=[
-                    Evidence(
-                        source_url="https://crt.sh/",
-                        note="Observed in certificate transparency dataset.",
-                    )
-                ],
-            )
-        )
-
-    stats["hosts"] = len(discovered)
-    stats["findings"] = len(findings)
-    if stats["errors"]:
-        stats["status"] = "partial" if discovered else "error"
-    return discovered, findings
+    return collect_ct_subdomains_source(
+        context,
+        stats,
+        fetch_url=fetch_url_ct,
+        normalize_domain=normalize_domain,
+        log=log,
+    )
 
 
 def build_dork_queries(domain: str) -> list[tuple[str, str]]:
-    return [
-        (f"site:{domain} ext:env", "dotenv"),
-        (f"site:{domain} ext:sql", "sql-dump"),
-        (f"site:{domain} (ext:bak OR ext:backup OR ext:old)", "backup-file"),
-        (f"site:{domain} inurl:.git/config", "git-config"),
-        (f"site:{domain} (ext:zip OR ext:tar OR ext:gz)", "archive"),
-    ]
+    return build_dork_queries_source(domain)
 
 
 def build_commoncrawl_patterns(domain: str) -> list[tuple[str, str]]:
-    return [
-        (f"*.{domain}/*.env", "dotenv"),
-        (f"{domain}/*.env", "dotenv"),
-        (f"*.{domain}/*.sql", "sql-dump"),
-        (f"{domain}/*.sql", "sql-dump"),
-        (f"*.{domain}/*.bak", "backup-file"),
-        (f"*.{domain}/*.backup", "backup-file"),
-        (f"*.{domain}/*.old", "backup-file"),
-        (f"*.{domain}/.git/config", "git-config"),
-        (f"{domain}/.git/config", "git-config"),
-        (f"*.{domain}/*.zip", "archive"),
-        (f"*.{domain}/*.tar", "archive"),
-        (f"*.{domain}/*.gz", "archive"),
-    ]
+    return build_commoncrawl_patterns_source(domain)
 
 
 def fetch_commoncrawl_index_endpoint(timeout: int) -> Optional[str]:
-    status, body, _ = fetch_url("https://index.commoncrawl.org/collinfo.json", timeout=timeout)
-    if status != 200 or not body:
-        return None
-    try:
-        rows = json.loads(body)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(rows, list):
-        return None
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        endpoint = row.get("cdx-api")
-        if isinstance(endpoint, str) and endpoint.startswith("http"):
-            return endpoint.rstrip("/")
-        identifier = row.get("id")
-        if isinstance(identifier, str) and identifier.strip():
-            suffix = identifier if identifier.endswith("-index") else f"{identifier}-index"
-            return f"https://index.commoncrawl.org/{suffix}"
-    return None
+    return fetch_commoncrawl_index_endpoint_source(
+        timeout,
+        fetch_url=fetch_url_search,
+        json_loads=json.loads,
+    )
 
 
 def fetch_commoncrawl_results(
     index_endpoint: str, pattern: str, timeout: int, limit: int = 25
 ) -> tuple[int, list[dict[str, str]], str]:
-    url = (
-        f"{index_endpoint}?url={parse.quote_plus(pattern)}&output=json&fl=url&limit={limit}"
+    return fetch_commoncrawl_results_source(
+        index_endpoint,
+        pattern,
+        timeout,
+        limit=limit,
+        fetch_url=fetch_url_search,
+        iter_json_records=iter_json_records,
+        quote_plus=parse.quote_plus,
     )
-    status, body, _ = fetch_url(url, timeout=timeout)
-    if status != 200 or not body:
-        return status, [], url
-    results: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for row in iter_json_records(body):
-        target = row.get("url")
-        if not isinstance(target, str) or not target:
-            continue
-        if target in seen:
-            continue
-        seen.add(target)
-        results.append({"url": target, "title": "", "snippet": ""})
-    return status, results, url
 
 
 def parse_bing_results(html: str) -> list[dict[str, str]]:
-    blocks = re.findall(r'<li class="b_algo".*?</li>', html, flags=re.S)
-    results: list[dict[str, str]] = []
-
-    for block in blocks:
-        href_match = re.search(r'<h2><a href="(https?://[^"]+)"', block)
-        if not href_match:
-            continue
-
-        title_match = re.search(r"<h2><a[^>]*>(.*?)</a></h2>", block, flags=re.S)
-        snippet_match = re.search(r'<p>(.*?)</p>', block, flags=re.S)
-
-        title = ""
-        snippet = ""
-        if title_match:
-            title = re.sub(r"<.*?>", "", title_match.group(1))
-        if snippet_match:
-            snippet = re.sub(r"<.*?>", "", snippet_match.group(1))
-
-        results.append(
-            {
-                "url": unescape(href_match.group(1)),
-                "title": unescape(title.strip()),
-                "snippet": unescape(snippet.strip()),
-            }
-        )
-
-    return results
+    return parse_bing_results_source(html)
 
 
 def classify_leak(url: str, snippet: str) -> tuple[str, str, str, list[str]]:
-    lower = f"{url} {snippet}".lower()
-
-    rules: list[tuple[list[str], str, str, str, list[str]]] = [
-        (
-            [".env", "dotenv"],
-            "Potential .env exposure indexed",
-            "high",
-            "Indexed result suggests a dotenv file might be exposed.",
-            ["credentials", "env-file", "indexed"],
-        ),
-        (
-            [".git/config", "/.git/"],
-            "Potential Git metadata exposure indexed",
-            "high",
-            "Indexed result suggests repository metadata may be exposed.",
-            ["source-code", "git", "indexed"],
-        ),
-        (
-            ["backup", ".bak", ".old", "backup.sql"],
-            "Potential backup file indexed",
-            "medium",
-            "Indexed result suggests backup artifacts may be exposed.",
-            ["backup", "indexed"],
-        ),
-        (
-            [".sql"],
-            "Potential SQL dump indexed",
-            "high",
-            "Indexed result suggests SQL dump data may be publicly reachable.",
-            ["database", "indexed"],
-        ),
-        (
-            [".zip", ".tar", ".gz"],
-            "Potential archive exposure indexed",
-            "medium",
-            "Indexed result suggests downloadable archives may be exposed.",
-            ["archive", "indexed"],
-        ),
-    ]
-
-    for needles, title, sev, desc, tags in rules:
-        if any(n in lower for n in needles):
-            return title, sev, desc, tags
-
-    return (
-        "Potential sensitive file indexed",
-        "low",
-        "Search result matched a sensitive-file dork pattern.",
-        ["indexed"],
-    )
+    return classify_leak_source(url, snippet)
 
 
 def collect_search_index_findings(
     context: ScanContext, health: Optional[dict[str, Any]] = None
 ) -> tuple[set[str], list[Finding]]:
     stats = health if health is not None else init_source_health("search")
-    findings: list[Finding] = []
-    discovered_hosts: set[str] = set()
-    provider_stats: dict[str, dict[str, Any]] = {
-        provider: {"queries": 0, "errors": 0, "results": 0, "status": "ok"}
-        for provider in context.search_providers
-    }
-
-    commoncrawl_index = None
-    if "commoncrawl" in context.search_providers:
-        commoncrawl_index = fetch_commoncrawl_index_endpoint(context.timeout)
-        if not commoncrawl_index:
-            provider_stats["commoncrawl"]["status"] = "error"
-            provider_stats["commoncrawl"]["errors"] += 1
-            provider_stats["commoncrawl"]["queries"] += 1
-            stats["errors"] += 1
-            stats["notes"].append("failed to resolve Common Crawl index endpoint")
-
-    for domain in context.domains:
-        if "bing" in context.search_providers:
-            for query, category in build_dork_queries(domain):
-                provider_stats["bing"]["queries"] += 1
-                stats["queried"] += 1
-                url = f"https://www.bing.com/search?q={parse.quote_plus(query)}&count=30"
-                status, body, _ = fetch_url(url, timeout=context.timeout)
-                if status != 200 or not body:
-                    provider_stats["bing"]["errors"] += 1
-                    stats["errors"] += 1
-                    log(
-                        f"[search] provider=bing {domain} query='{query}' failed status={status}",
-                        context.verbose,
-                    )
-                    continue
-
-                results = parse_bing_results(body)
-                provider_stats["bing"]["results"] += len(results)
-                log(
-                    f"[search] provider=bing {domain} query='{category}' results={len(results)}",
-                    context.verbose,
-                )
-
-                for item in results:
-                    target = item["url"]
-                    parsed = parse.urlparse(target)
-                    host = (parsed.hostname or "").lower()
-                    if not host:
-                        continue
-
-                    if not (host == domain or host.endswith(f".{domain}")):
-                        continue
-
-                    discovered_hosts.add(host)
-                    title, severity, description, tags = classify_leak(
-                        target, item.get("snippet", "")
-                    )
-                    findings.append(
-                        Finding(
-                            asset_type="indexed_leak",
-                            asset=target,
-                            severity=severity,
-                            confidence="medium",
-                            title=title,
-                            description=description,
-                            source="bing",
-                            tags=["passive", category, *tags],
-                            evidence=[
-                                Evidence(
-                                    source_url=url,
-                                    note=f"Search hit title: {item.get('title', '')[:120]}",
-                                )
-                            ],
-                        )
-                    )
-
-        if "commoncrawl" in context.search_providers and commoncrawl_index:
-            for pattern, category in build_commoncrawl_patterns(domain):
-                provider_stats["commoncrawl"]["queries"] += 1
-                stats["queried"] += 1
-                status, results, query_url = fetch_commoncrawl_results(
-                    commoncrawl_index, pattern, context.timeout
-                )
-                if status != 200:
-                    provider_stats["commoncrawl"]["errors"] += 1
-                    stats["errors"] += 1
-                    log(
-                        f"[search] provider=commoncrawl {domain} pattern='{pattern}' "
-                        f"failed status={status}",
-                        context.verbose,
-                    )
-                    continue
-
-                provider_stats["commoncrawl"]["results"] += len(results)
-                log(
-                    f"[search] provider=commoncrawl {domain} query='{category}' "
-                    f"results={len(results)}",
-                    context.verbose,
-                )
-
-                for item in results:
-                    target = item["url"]
-                    parsed = parse.urlparse(target)
-                    host = (parsed.hostname or "").lower()
-                    if not host:
-                        continue
-                    if not (host == domain or host.endswith(f".{domain}")):
-                        continue
-
-                    discovered_hosts.add(host)
-                    title, severity, description, tags = classify_leak(
-                        target, item.get("snippet", "")
-                    )
-                    findings.append(
-                        Finding(
-                            asset_type="indexed_leak",
-                            asset=target,
-                            severity=severity,
-                            confidence="medium",
-                            title=title,
-                            description=description,
-                            source="commoncrawl",
-                            tags=["passive", category, *tags],
-                            evidence=[
-                                Evidence(
-                                    source_url=query_url,
-                                    note=f"Common Crawl pattern: {pattern}",
-                                )
-                            ],
-                        )
-                    )
-
-    for provider, provider_stat in provider_stats.items():
-        if provider_stat["errors"]:
-            provider_stat["status"] = (
-                "partial" if provider_stat["results"] > 0 else "error"
-            )
-        elif provider_stat["results"] == 0 and provider_stat["queries"] > 0:
-            provider_stat["status"] = "ok_no_results"
-    stats["providers"] = provider_stats
-    stats["hosts"] = len(discovered_hosts)
-    stats["findings"] = len(findings)
-    if stats["errors"]:
-        stats["status"] = "partial" if findings else "error"
-    elif findings:
-        stats["status"] = "ok"
-    else:
-        stats["status"] = "ok_no_results"
-
-    return discovered_hosts, findings
+    return collect_search_index_findings_source(
+        context,
+        stats,
+        build_dork_queries=build_dork_queries,
+        build_commoncrawl_patterns=build_commoncrawl_patterns,
+        fetch_commoncrawl_index_endpoint=fetch_commoncrawl_index_endpoint,
+        fetch_commoncrawl_results=fetch_commoncrawl_results,
+        fetch_url=fetch_url_search,
+        parse_bing_results=parse_bing_results,
+        classify_leak=classify_leak,
+        log=log,
+    )
 
 
 def sanitize_bucket_label(value: str) -> str:
-    cleaned = re.sub(r"[^a-z0-9.-]", "-", value.lower())
-    cleaned = cleaned.strip("-.")
-    cleaned = re.sub(r"\.{2,}", ".", cleaned)
-    cleaned = re.sub(r"-{2,}", "-", cleaned)
-    return cleaned
+    return sanitize_bucket_label_source(value)
+
+
+def sanitize_azure_container_label(value: str) -> str:
+    return sanitize_azure_container_label_source(value)
+
+
+def is_valid_azure_container_name(value: str) -> bool:
+    return is_valid_azure_container_name_source(value)
 
 
 def extract_bucket_candidates_from_hosts(hosts: set[str]) -> set[str]:
-    candidates: set[str] = set()
+    return extract_bucket_candidates_from_hosts_source(
+        hosts,
+        sanitize_bucket_label=sanitize_bucket_label,
+    )
 
-    for host in hosts:
-        parts = host.split(".")
-        if not parts:
-            continue
 
-        candidates.add(sanitize_bucket_label(host.replace(".", "-")))
+def extract_azure_storage_account_from_cname(cname: str) -> str:
+    return extract_azure_storage_account_from_cname_source(
+        cname,
+        normalize_domain=normalize_domain,
+        azure_blob_cname_suffixes=AZURE_BLOB_CNAME_SUFFIXES,
+    )
 
-        if len(parts) > 2:
-            left = "-".join(parts[:-2])
-            candidates.add(sanitize_bucket_label(left))
 
-        if "s3" in parts:
-            idx = parts.index("s3")
-            if idx > 0:
-                candidates.add(sanitize_bucket_label(parts[idx - 1]))
+def parse_azure_error_code(headers: dict[str, str], body: str) -> str:
+    return parse_azure_error_code_source(headers, body)
 
-    return {c for c in candidates if 3 <= len(c) <= 63}
+
+def parse_s3_error_code(headers: dict[str, str], body: str) -> str:
+    return parse_s3_error_code_source(headers, body)
+
+
+def classify_azure_blob_status(status: int, error_code: str) -> str:
+    return classify_azure_blob_status_source(
+        status,
+        error_code,
+        azure_blob_likely_exists_error_codes=AZURE_BLOB_LIKELY_EXISTS_ERROR_CODES,
+    )
+
+
+def build_azure_container_wordlist(
+    context: ScanContext, discovered_hosts: set[str]
+) -> set[str]:
+    return build_azure_container_wordlist_source(
+        context,
+        discovered_hosts,
+        sanitize_azure_container_label=sanitize_azure_container_label,
+        is_valid_azure_container_name=is_valid_azure_container_name,
+    )
 
 
 def build_bucket_wordlist(context: ScanContext, discovered_hosts: set[str]) -> set[str]:
-    words: set[str] = set()
-
-    for domain in context.domains:
-        base = domain.split(".")[0]
-        words.add(sanitize_bucket_label(base))
-        words.add(sanitize_bucket_label(domain.replace(".", "-")))
-
-    if context.organization:
-        words.add(sanitize_bucket_label(context.organization.replace(" ", "-")))
-
-    for kw in context.keywords:
-        words.add(sanitize_bucket_label(kw))
-
-    words.update(extract_bucket_candidates_from_hosts(discovered_hosts))
-
-    patterns = [
-        "{w}",
-        "{w}-assets",
-        "{w}-static",
-        "{w}-media",
-        "{w}-uploads",
-        "{w}-backup",
-        "{w}-backups",
-        "{w}-dev",
-        "{w}-prod",
-        "{w}-logs",
-    ]
-
-    candidates: set[str] = set()
-    for word in words:
-        if not word:
-            continue
-        for pat in patterns:
-            candidate = sanitize_bucket_label(pat.format(w=word))
-            if 3 <= len(candidate) <= 63:
-                candidates.add(candidate)
-
-    return candidates
+    return build_bucket_wordlist_source(
+        context,
+        discovered_hosts,
+        sanitize_bucket_label=sanitize_bucket_label,
+        extract_bucket_candidates_from_hosts=extract_bucket_candidates_from_hosts,
+    )
 
 
 def classify_s3_head_status(status: int, region: str) -> str:
-    if status == 200:
-        return "confirmed_exists"
-    if status in {301, 302, 307, 308, 403}:
-        return "likely_exists" if region else "unknown"
-    if status in {400, 404}:
-        return "unknown"
-    return "unknown"
+    return classify_s3_head_status_source(status, region)
 
 
-def probe_s3_list_access(bucket: str, timeout: int) -> tuple[int, dict[str, str]]:
-    url = f"https://{bucket}.s3.amazonaws.com/?list-type=2&max-keys=0"
-    status, _, headers = fetch_url(url, timeout=timeout, method="GET")
-    return status, headers
+def probe_s3_list_access(bucket: str, timeout: int) -> tuple[int, dict[str, str], str]:
+    return probe_s3_list_access_source(
+        bucket,
+        timeout,
+        fetch_url=fetch_url,
+        parse_s3_error_code=parse_s3_error_code,
+        cloud_probe_http_retries=CLOUD_PROBE_HTTP_RETRIES,
+    )
+
+
+def probe_s3_object_access(
+    bucket: str, timeout: int
+) -> tuple[int, dict[str, str], str]:
+    return probe_s3_object_access_source(
+        bucket,
+        timeout,
+        fetch_url=fetch_url,
+        parse_s3_error_code=parse_s3_error_code,
+        cloud_probe_http_retries=CLOUD_PROBE_HTTP_RETRIES,
+    )
 
 
 def check_single_bucket_exists(
     bucket: str, timeout: int, s3_list_probe: bool = True
 ) -> tuple[str, Optional[int], str, str, Optional[int]]:
-    url = f"https://{bucket}.s3.amazonaws.com/"
-    status, _, headers = fetch_url(url, timeout=timeout, method="HEAD")
-
-    region = headers.get("x-amz-bucket-region") or headers.get("X-Amz-Bucket-Region")
-    existence = classify_s3_head_status(status, region or "")
-    list_status: Optional[int] = None
-
-    if s3_list_probe and existence == "unknown":
-        list_status, list_headers = probe_s3_list_access(bucket, timeout)
-        if list_status == 200:
-            existence = "confirmed_exists"
-        elif list_status == 403:
-            existence = "likely_exists"
-        if not region:
-            region = list_headers.get("x-amz-bucket-region") or list_headers.get(
-                "X-Amz-Bucket-Region"
-            )
-
-    return bucket, status, existence, region or "", list_status
+    return check_single_bucket_exists_source(
+        bucket,
+        timeout,
+        s3_list_probe=s3_list_probe,
+        fetch_url=fetch_url,
+        classify_s3_head_status=classify_s3_head_status,
+        probe_s3_list_access=probe_s3_list_access,
+        probe_s3_object_access=probe_s3_object_access,
+        cloud_probe_http_retries=CLOUD_PROBE_HTTP_RETRIES,
+    )
 
 
 def collect_s3_bucket_findings(
     context: ScanContext, hosts: set[str], health: Optional[dict[str, Any]] = None
 ) -> list[Finding]:
     stats = health if health is not None else init_source_health("s3")
-    findings: list[Finding] = []
-    candidates = sorted(build_bucket_wordlist(context, hosts))
-    if not candidates:
-        stats["status"] = "ok_no_candidates"
-        return findings
+    return collect_s3_bucket_findings_source(
+        context,
+        hosts,
+        stats,
+        build_bucket_wordlist=build_bucket_wordlist,
+        check_single_bucket_exists=check_single_bucket_exists,
+        log=log,
+    )
 
-    stats["queried"] = len(candidates)
-    if len(candidates) > context.max_bucket_candidates:
-        log(
-            "[s3] candidate list capped at "
-            f"{context.max_bucket_candidates} (from {len(candidates)})",
-            context.verbose,
-            force=True,
-        )
-        candidates = candidates[: context.max_bucket_candidates]
-        stats["queried"] = len(candidates)
 
-    log(f"[s3] checking {len(candidates)} bucket candidates", context.verbose)
+def classify_gcp_status(status: int) -> str:
+    return classify_gcp_status_source(status)
 
-    checked = 0
-    ambiguous_signals = 0
-    suppressed_weak_likely = 0
-    with ThreadPoolExecutor(max_workers=context.threads) as pool:
-        futures = {
-            pool.submit(
-                check_single_bucket_exists,
-                bucket,
-                context.timeout,
-                context.s3_list_probe,
-            ): bucket
-            for bucket in candidates
-        }
-        for fut in as_completed(futures):
-            checked += 1
-            bucket = futures[fut]
-            try:
-                _, status, existence, region, list_status = fut.result()
-            except Exception:
-                continue
 
-            if context.verbose and checked % 50 == 0:
-                log(
-                    f"[s3] progress {checked}/{len(candidates)}",
-                    context.verbose,
-                )
+def probe_gcp_list_access(bucket: str, timeout: int) -> int:
+    return probe_gcp_list_access_source(
+        bucket,
+        timeout,
+        fetch_url=fetch_url,
+        cloud_probe_http_retries=CLOUD_PROBE_HTTP_RETRIES,
+    )
 
-            if status is None or status == 0:
-                stats["errors"] += 1
-                continue
-            # Reduce noise: HEAD 400/404 plus list-probe 403 is weak evidence of existence.
-            if existence == "likely_exists" and status in {400, 404} and list_status == 403:
-                suppressed_weak_likely += 1
-                ambiguous_signals += 1
-                continue
-            if existence in {"not_exists", "unknown"}:
-                if existence == "unknown":
-                    ambiguous_signals += 1
-                continue
 
-            tags = ["cloud", "s3", "passive"]
-            if existence == "confirmed_exists":
-                severity = "medium"
-                confidence = "high"
-                if list_status == 200 and status != 200:
-                    title = "Publicly listable S3 bucket (anonymous probe)"
-                    description = (
-                        "Anonymous ListObjectsV2 probe succeeded (HTTP 200). "
-                        "Validate access controls and exposure in a permitted workflow."
-                    )
-                    tags.append("listable")
-                else:
-                    title = "Potentially public S3 bucket"
-                    description = (
-                        "Bucket endpoint returned HTTP 200. Validate access control in a "
-                        "permitted environment."
-                    )
-            elif existence == "likely_exists":
-                severity = "low"
-                confidence = "medium"
-                title = "S3 bucket name likely exists (HEAD signal)"
-                description = (
-                    "Bucket endpoint response strongly suggests the bucket name exists, "
-                    "but anonymous access is not available."
-                )
-                tags.append("likely-exists")
-            region_note = f" region={region}" if region else ""
-            list_note = f" list_probe_status={list_status}" if list_status is not None else ""
-            findings.append(
-                Finding(
-                    asset_type="s3_bucket",
-                    asset=bucket,
-                    severity=severity,
-                    confidence=confidence,
-                    title=title,
-                    description=description,
-                    source="aws-s3-head",
-                    tags=tags,
-                    evidence=[
-                        Evidence(
-                            source_url=f"https://{bucket}.s3.amazonaws.com/",
-                            note=(
-                                f"HEAD status={status}. existence={existence}.{region_note}"
-                                f"{list_note}"
-                            ),
-                        )
-                    ],
-                )
-            )
+def check_single_gcp_bucket_exists(
+    bucket: str, timeout: int
+) -> tuple[str, Optional[int], str, Optional[int]]:
+    return check_single_gcp_bucket_exists_source(
+        bucket,
+        timeout,
+        fetch_url=fetch_url,
+        classify_gcp_status=classify_gcp_status,
+        probe_gcp_list_access=probe_gcp_list_access,
+        cloud_probe_http_retries=CLOUD_PROBE_HTTP_RETRIES,
+    )
 
-    stats["ambiguous"] = ambiguous_signals
-    stats["suppressed_weak_likely"] = suppressed_weak_likely
-    stats["hosts"] = len(findings)
-    stats["findings"] = len(findings)
-    if stats["errors"]:
-        stats["status"] = "partial" if findings else "error"
-    elif findings:
-        stats["status"] = "ok"
-    else:
-        stats["status"] = "ok_no_results"
 
-    if not findings and ambiguous_signals:
-        print(
-            "    [s3] no confident bucket hits; responses were ambiguous "
-            f"for {ambiguous_signals}/{len(candidates)} candidates"
-        )
-        print(
-            "    [s3] note: unauthenticated HeadBucket may return generic 400/403/404 "
-            "that cannot confirm bucket existence"
-        )
+def collect_gcp_bucket_findings(
+    context: ScanContext, hosts: set[str], health: Optional[dict[str, Any]] = None
+) -> list[Finding]:
+    stats = health if health is not None else init_source_health("gcp")
+    return collect_gcp_bucket_findings_source(
+        context,
+        hosts,
+        stats,
+        build_bucket_wordlist=build_bucket_wordlist,
+        check_single_gcp_bucket_exists=check_single_gcp_bucket_exists,
+        log=log,
+    )
 
-    return findings
+
+def check_single_azure_blob_container(
+    account: str, container: str, timeout: int
+) -> tuple[str, str, int, str, str, str]:
+    return check_single_azure_blob_container_source(
+        account,
+        container,
+        timeout,
+        fetch_url=fetch_url,
+        parse_azure_error_code=parse_azure_error_code,
+        classify_azure_blob_status=classify_azure_blob_status,
+        azure_blob_api_version=AZURE_BLOB_API_VERSION,
+        cloud_probe_http_retries=CLOUD_PROBE_HTTP_RETRIES,
+    )
+
+
+def collect_azure_blob_findings(
+    context: ScanContext, hosts: set[str], health: Optional[dict[str, Any]] = None
+) -> list[Finding]:
+    stats = health if health is not None else init_source_health("azure")
+    return collect_azure_blob_findings_source(
+        context,
+        hosts,
+        stats,
+        fetch_doh_cname_records=fetch_doh_cname_records,
+        extract_azure_storage_account_from_cname=extract_azure_storage_account_from_cname,
+        build_azure_container_wordlist=build_azure_container_wordlist,
+        check_single_azure_blob_container=check_single_azure_blob_container,
+        azure_blob_reference_url=AZURE_BLOB_REFERENCE_URL,
+    )
 
 
 def parse_keywords(value: Optional[str]) -> list[str]:
-    if not value:
-        return []
-    return [x.strip().lower() for x in value.split(",") if x.strip()]
+    return parse_keywords_source(value)
 
 
 def parse_search_providers(value: Optional[str]) -> list[str]:
-    if not value:
-        return ["bing", "commoncrawl"]
-    ordered: list[str] = []
-    for item in value.split(","):
-        provider = item.strip().lower()
-        if not provider:
-            continue
-        if provider not in SUPPORTED_SEARCH_PROVIDERS:
-            supported = ", ".join(sorted(SUPPORTED_SEARCH_PROVIDERS))
-            raise ValueError(
-                f"Unsupported search provider '{provider}'. Supported values: {supported}"
-            )
-        if provider not in ordered:
-            ordered.append(provider)
-    if not ordered:
-        raise ValueError("No valid search providers configured")
-    return ordered
+    return parse_search_providers_source(
+        value,
+        supported_search_providers=SUPPORTED_SEARCH_PROVIDERS,
+    )
 
 
 def positive_int(value: str) -> int:
-    try:
-        parsed = int(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"Invalid integer value: {value}") from exc
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError("Value must be a positive integer")
-    return parsed
+    return positive_int_source(value)
 
 
 def load_domains(single: Optional[str], domain_list: Optional[str]) -> list[str]:
-    domains: list[str] = []
-
-    if single:
-        domains.append(normalize_domain(single))
-
-    if domain_list:
-        path = Path(domain_list)
-        try:
-            with path.open() as handle:
-                for line in handle:
-                    raw = line.strip()
-                    if not raw or raw.startswith("#"):
-                        continue
-                    domains.append(normalize_domain(raw))
-        except OSError as exc:
-            raise ValueError(f"Could not read domain list file '{domain_list}': {exc}") from exc
-
-    return sorted(set(domains))
+    return load_domains_source(
+        single,
+        domain_list,
+        normalize_domain=normalize_domain,
+    )
 
 
 def run_scan(args: argparse.Namespace) -> dict:
-    domains = load_domains(args.domain, args.domain_list)
-    if not domains:
-        raise ValueError("No valid domains provided. Use -d or -dL.")
-    search_providers = parse_search_providers(args.search_providers)
-
-    context = ScanContext(
-        domains=domains,
-        organization=args.organization,
-        keywords=parse_keywords(args.keywords),
-        search_providers=search_providers,
-        timeout=args.timeout,
-        tool_timeout=args.tool_timeout,
-        threads=args.threads,
-        max_bucket_candidates=args.max_bucket_candidates,
-        verbose=args.verbose,
-        s3_list_probe=args.s3_list_probe,
+    return run_scan_source(
+        args,
+        load_domains=load_domains,
+        parse_search_providers=parse_search_providers,
+        parse_keywords=parse_keywords,
+        scan_context_cls=ScanContext,
+        init_source_health=init_source_health,
+        collect_subfinder_subdomains=collect_subfinder_subdomains,
+        collect_amass_subdomains=collect_amass_subdomains,
+        collect_ct_subdomains=collect_ct_subdomains,
+        collect_search_index_findings=collect_search_index_findings,
+        collect_s3_bucket_findings=collect_s3_bucket_findings,
+        collect_gcp_bucket_findings=collect_gcp_bucket_findings,
+        collect_azure_blob_findings=collect_azure_blob_findings,
+        collect_subdomain_takeover_findings=collect_subdomain_takeover_findings,
+        dedupe_findings=dedupe_findings,
+        make_summary=make_summary,
+        finding_sort_key=finding_sort_key,
+        asdict_fn=asdict,
+        normalize_source_health=normalize_source_health,
+        now_utc_iso=lambda: datetime.now(timezone.utc).isoformat(),
     )
-
-    print(f"[*] Passive scan started for {len(domains)} domain(s)")
-    print("[*] Mode: passive OSINT only (no direct target exploitation/scanning)")
-
-    findings: list[Finding] = []
-    discovered_hosts: set[str] = set()
-    source_health: dict[str, dict[str, Any]] = {
-        "subfinder": init_source_health("subfinder", enabled=not args.no_subfinder),
-        "amass": init_source_health("amass", enabled=not args.no_amass),
-        "ct": init_source_health("crt.sh", enabled=not args.no_ct),
-        "search": init_source_health("search", enabled=not args.no_search),
-        "s3": init_source_health("s3", enabled=not args.no_s3),
-        "takeover": init_source_health("takeover", enabled=not args.no_takeover),
-    }
-    if not args.no_search:
-        source_health["search"]["providers"] = {
-            provider: {"status": "pending", "queries": 0, "errors": 0, "results": 0}
-            for provider in search_providers
-        }
-
-    if not args.no_subfinder:
-        print("[*] Collecting passive subdomains (subfinder)...")
-        sf_hosts, sf_findings = collect_subfinder_subdomains(
-            context, source_health["subfinder"]
-        )
-        discovered_hosts.update(sf_hosts)
-        findings.extend(sf_findings)
-        print(f"    [subfinder] hosts discovered: {len(sf_hosts)}")
-
-    if not args.no_amass:
-        print("[*] Collecting passive subdomains (amass)...")
-        am_hosts, am_findings = collect_amass_subdomains(context, source_health["amass"])
-        discovered_hosts.update(am_hosts)
-        findings.extend(am_findings)
-        print(f"    [amass] hosts discovered: {len(am_hosts)}")
-
-    if not args.no_ct:
-        print("[*] Collecting subdomains from CT logs (crt.sh)...")
-        ct_hosts, ct_findings = collect_ct_subdomains(context, source_health["ct"])
-        discovered_hosts.update(ct_hosts)
-        findings.extend(ct_findings)
-        print(f"    [ct] hosts discovered: {len(ct_hosts)}")
-
-    if not args.no_search:
-        provider_list = ", ".join(search_providers)
-        print(f"[*] Collecting indexed exposure signals ({provider_list})...")
-        search_hosts, search_findings = collect_search_index_findings(
-            context, source_health["search"]
-        )
-        discovered_hosts.update(search_hosts)
-        findings.extend(search_findings)
-        print(f"    [search] indexed findings: {len(search_findings)}")
-
-    if not args.no_s3:
-        if args.s3_list_probe:
-            print("[*] Checking candidate S3 bucket names (HEAD + optional list probe)...")
-        else:
-            print("[*] Checking candidate S3 bucket names (HEAD only)...")
-        s3_findings = collect_s3_bucket_findings(context, discovered_hosts, source_health["s3"])
-        findings.extend(s3_findings)
-        print(f"    [s3] matching bucket names: {len(s3_findings)}")
-
-    if not args.no_takeover:
-        print("[*] Checking discovered subdomains for takeover fingerprints...")
-        takeover_findings = collect_subdomain_takeover_findings(
-            context,
-            discovered_hosts,
-            source_health["takeover"],
-        )
-        findings.extend(takeover_findings)
-        print(f"    [takeover] potential takeover findings: {len(takeover_findings)}")
-
-    findings = dedupe_findings(findings)
-
-    legal_notes = [
-        "No direct port scanning or exploitation performed.",
-        "Search/index signals require validation in an authorized workflow.",
-        "Takeover checks use DNS-over-HTTPS CNAME resolution and passive HTTP fingerprinting.",
-    ]
-    if args.s3_list_probe:
-        legal_notes.append(
-            "S3 checks use HEAD requests and optional anonymous ListObjectsV2 probes "
-            "with max-keys=0 (no object retrieval)."
-        )
-    else:
-        legal_notes.append(
-            "S3 checks use bucket endpoint HEAD requests only (no object retrieval)."
-        )
-
-    report = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "mode": "passive_osint",
-        "targets": domains,
-        "organization": args.organization,
-        "legal": {
-            "active_scanning_performed": False,
-            "notes": legal_notes,
-        },
-        "inventory": {
-            "discovered_hosts": sorted(discovered_hosts),
-        },
-        "source_health": source_health,
-        "summary": make_summary(findings),
-        "findings": [
-            {
-                **asdict(f),
-                "evidence": [asdict(e) for e in f.evidence],
-            }
-            for f in sorted(findings, key=finding_sort_key)
-        ],
-    }
-
-    return report
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Passive perimeter discovery tool for domains/orgs using public OSINT "
-            "signals (CT logs, indexed exposure dorks, S3 bucket checks, "
-            "and subdomain takeover fingerprints)."
-        )
-    )
-
-    parser.add_argument("-d", "--domain", help="Single root domain")
-    parser.add_argument("-dL", "--domain-list", help="File with root domains")
-    parser.add_argument("-o", "--output", default="perimeter_report.json")
-    parser.add_argument(
-        "--organization",
-        help="Organization/company name to improve bucket candidate generation",
-    )
-    parser.add_argument(
-        "--keywords",
-        help="Comma-separated keywords/brands for passive bucket guessing",
-    )
-    parser.add_argument(
-        "--search-providers",
-        default="bing,commoncrawl",
-        help="Comma-separated search providers (supported: bing, commoncrawl)",
-    )
-    parser.add_argument("--timeout", type=positive_int, default=10, help="HTTP timeout seconds")
-    parser.add_argument(
-        "--tool-timeout",
-        type=positive_int,
-        default=300,
-        help="Timeout seconds for passive external tools (subfinder/amass)",
-    )
-    parser.add_argument(
-        "-t",
-        "--threads",
-        type=positive_int,
-        default=20,
-        help="Worker threads for concurrent passive checks",
-    )
-    parser.add_argument("-v", "--verbose", action="store_true")
-    parser.add_argument(
-        "--max-bucket-candidates",
-        type=positive_int,
-        default=800,
-        help="Maximum candidate S3 bucket names to check",
-    )
-    parser.add_argument(
-        "--s3-list-probe",
-        action="store_true",
-        dest="s3_list_probe",
-        help=(
-            "Enable anonymous ListObjectsV2 probes (max-keys=0) when S3 HEAD responses "
-            "are ambiguous (enabled by default)"
-        ),
-    )
-    parser.add_argument(
-        "--no-s3-list-probe",
-        action="store_false",
-        dest="s3_list_probe",
-        help="Disable anonymous ListObjectsV2 fallback probes for ambiguous S3 responses",
-    )
-    parser.set_defaults(s3_list_probe=True)
-
-    parser.add_argument("--no-ct", action="store_true", help="Disable CT log collection")
-    parser.add_argument(
-        "--no-subfinder",
-        action="store_true",
-        help="Disable passive subdomain collection via subfinder",
-    )
-    parser.add_argument(
-        "--no-amass",
-        action="store_true",
-        help="Disable passive subdomain collection via amass",
-    )
-    parser.add_argument(
-        "--no-search", action="store_true", help="Disable search-index exposure dorks"
-    )
-    parser.add_argument("--no-s3", action="store_true", help="Disable S3 bucket checks")
-    parser.add_argument(
-        "--no-takeover",
-        action="store_true",
-        help="Disable passive subdomain takeover fingerprint checks",
-    )
-
-    return parser
+    return build_parser_source(positive_int=positive_int)
 
 
 def main() -> None:
-    parser = build_parser()
-    args = parser.parse_args()
-
-    try:
-        report = run_scan(args)
-    except ValueError as exc:
-        print(f"[!] {exc}")
-        sys.exit(1)
-
-    try:
-        with open(args.output, "w") as out:
-            json.dump(report, out, indent=2)
-    except OSError as exc:
-        print(f"[!] Could not write output file '{args.output}': {exc}")
-        sys.exit(1)
-
-    print(f"[+] Report written: {args.output}")
-    print(f"[+] Total findings: {report['summary']['total_findings']}")
+    return main_source(build_parser=build_parser, run_scan=run_scan)
 
 
 if __name__ == "__main__":

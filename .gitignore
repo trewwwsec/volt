@@ -23,9 +23,3 @@ mvp_*.json
 # Editor/IDE
 .vscode/
 .idea/
-
-# Codex generated artifacts
-.codex/
-codex-out/
-.codex/conversion-manifest.json
-.codex-setup-backups/

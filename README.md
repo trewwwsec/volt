@@ -44,26 +44,6 @@ It is designed for legal-safe OSINT workflows: no port scanning, no exploitation
 - Run tests:
   - `uv run python -m unittest discover -s tests -p "test_*.py"`
 
-## Codex Setup
-
-This repo includes a Codex conversion workflow inspired by `everything-claude-code`.
-
-- Shell command:
-  - `./codex-setup --dry-run`
-  - `./codex-setup`
-- Python entrypoint:
-  - `uv run python codex_setup.py --dry-run`
-  - `uv run python codex_setup.py`
-
-What it writes:
-- `.codex/config.toml` (Codex baseline config, no MCP server blocks by default)
-- `.codex/AGENTS.md` (Codex-specific instructions)
-- `.codex/prompts/*.md` (converted command prompts, including `/codex-setup`)
-- `.codex/conversion-manifest.json` (conversion summary)
-
-Slash command source:
-- `commands/codex-setup.md`
-
 Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md)
 Testing: [docs/TESTING.md](docs/TESTING.md)
 

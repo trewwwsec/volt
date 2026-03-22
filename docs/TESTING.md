@@ -16,8 +16,8 @@ CI gate:
 
 - GitHub Actions workflow: `.github/workflows/ci.yml`
 - Trigger: `push` and `pull_request`
-- Lint: `uvx ruff check .`
-- Format check: `uvx ruff format --check .`
+- Lint: `uv run ruff check .`
+- Format check: `uv run ruff format --check .`
 - Static check: `uv run python -m compileall -q subrecon.py cli.py constants.py core.py models.py networking.py parsing.py reporting.py subrecon_models.py subrecon_reporting.py sources tests`
 - Test command: `uv run python -m unittest discover -s tests -p "test_*.py"`
 
@@ -36,7 +36,7 @@ Current suite covers:
 - Subdomain takeover CNAME/fingerprint detection path
 - HTTP retry/backoff behavior for transient fetch failures
 - Source-specific retry policy wiring (CT/search/takeover vs cloud probes)
-- Edge-case parsing behavior (Common Crawl index/id fallback and URL de-duplication)
+- Edge-case parsing behavior (Common Crawl index/id fallback, S3/Azure error-code extraction fallback, and URL de-duplication)
 - Partial-failure source health transitions (`partial`/`error`) for CT, takeover, S3, and Azure paths
 - Source-health report block generation
 - Structured source-health error telemetry (`error_types`, `error_samples`) and normalization

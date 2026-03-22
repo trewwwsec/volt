@@ -58,13 +58,15 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
 - Expand test coverage for source parsing and edge cases.
 - Add linting/formatting checks via `uv run`.
 - Optionally add a lightweight CI workflow once local test/lint steps are stable.
-- Status: in progress.
+- Status: complete.
   - Added CI workflow at `.github/workflows/ci.yml` running Ruff lint/format checks, static compile checks, and `uv run python -m unittest discover`.
+  - Added `ruff` dev dependency group and standardized local/CI lint+format checks on `uv run ruff ...`.
   - Expanded automated tests for edge-case parsing and partial-failure source-health transitions.
+  - Added parser edge-case tests for S3/Azure error-code extraction fallbacks.
   - Added deterministic partial-failure simulation commands to `docs/TESTING.md`.
 
 ## Immediate Next Actions
 
 1. Periodically refresh the live-smoke snapshot in `docs/TESTING.md` as upstream sources evolve.
-2. Expand CI/local checks to include roadmap Phase 4 quality-gate goals.
-3. Evaluate when to deprecate compatibility shims (`subrecon_models.py`, `subrecon_reporting.py`) after downstream consumers migrate.
+2. Evaluate when to deprecate compatibility shims (`subrecon_models.py`, `subrecon_reporting.py`) after downstream consumers migrate.
+3. Keep CI runtime bounded while adding new targeted tests.

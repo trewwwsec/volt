@@ -1,0 +1,22 @@
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# macOS
+.DS_Store
+
+# Local output artifacts from scans
+*_subdomains.json
+*_subdomains.txt
+subdomains.json
+subdomains.txt
+jbl_com_subdomains.json
+
+# Editor/IDE
+.vscode/
+.idea/

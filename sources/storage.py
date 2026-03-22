@@ -1047,6 +1047,7 @@ def check_single_azure_blob_container(
     account: str,
     container: str,
     timeout: int,
+    azure_probe_retries: int = 0,
     *,
     fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
     parse_azure_error_code: Callable[[dict[str, str], str], str],
@@ -1054,12 +1055,13 @@ def check_single_azure_blob_container(
     azure_blob_api_version: str,
     cloud_probe_http_retries: int,
 ) -> tuple[str, str, int, str, str, str]:
+    retries = max(cloud_probe_http_retries, int(azure_probe_retries))
     encoded_container = quote(container, safe="")
     container_url = (
         f"https://{account}.blob.core.windows.net/{encoded_container}?restype=container"
     )
     status, body, headers = fetch_url(
-        container_url, timeout=timeout, method="HEAD", retries=cloud_probe_http_retries
+        container_url, timeout=timeout, method="HEAD", retries=retries
     )
     error_code = parse_azure_error_code(headers, body)
     if error_code == "FeatureVersionMismatch":
@@ -1068,7 +1070,7 @@ def check_single_azure_blob_container(
             timeout=timeout,
             method="HEAD",
             headers={"x-ms-version": azure_blob_api_version},
-            retries=cloud_probe_http_retries,
+            retries=retries,
         )
         error_code = parse_azure_error_code(headers, body)
     head_existence = classify_azure_blob_status(status, error_code)
@@ -1080,7 +1082,7 @@ def check_single_azure_blob_container(
 
     list_url = f"{container_url}&comp=list&maxresults=1"
     status, body, headers = fetch_url(
-        list_url, timeout=timeout, method="GET", retries=cloud_probe_http_retries
+        list_url, timeout=timeout, method="GET", retries=retries
     )
     error_code = parse_azure_error_code(headers, body)
     if error_code == "FeatureVersionMismatch":
@@ -1089,7 +1091,7 @@ def check_single_azure_blob_container(
             timeout=timeout,
             method="GET",
             headers={"x-ms-version": azure_blob_api_version},
-            retries=cloud_probe_http_retries,
+            retries=retries,
         )
         error_code = parse_azure_error_code(headers, body)
     existence = classify_azure_blob_status(status, error_code)
@@ -1103,17 +1105,19 @@ def probe_azure_blob_object_access(
     container: str,
     object_path: str,
     timeout: int,
+    azure_probe_retries: int = 0,
     *,
     fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
     parse_azure_error_code: Callable[[dict[str, str], str], str],
     azure_blob_api_version: str,
     cloud_probe_http_retries: int,
 ) -> tuple[int, str, str]:
+    retries = max(cloud_probe_http_retries, int(azure_probe_retries))
     encoded_container = quote(container, safe="")
     encoded_object_path = quote(object_path.lstrip("/"), safe="/")
     url = f"https://{account}.blob.core.windows.net/{encoded_container}/{encoded_object_path}"
     status, body, headers = fetch_url(
-        url, timeout=timeout, method="HEAD", retries=cloud_probe_http_retries
+        url, timeout=timeout, method="HEAD", retries=retries
     )
     error_code = parse_azure_error_code(headers, body)
     if error_code == "FeatureVersionMismatch":
@@ -1122,7 +1126,7 @@ def probe_azure_blob_object_access(
             timeout=timeout,
             method="HEAD",
             headers={"x-ms-version": azure_blob_api_version},
-            retries=cloud_probe_http_retries,
+            retries=retries,
         )
         error_code = parse_azure_error_code(headers, body)
     return status, error_code, url
@@ -1137,10 +1141,10 @@ def collect_azure_blob_findings(
     extract_azure_storage_account_from_cname: Callable[[str], str],
     build_azure_container_wordlist: Callable[[ScanContext, set[str]], set[str]],
     check_single_azure_blob_container: Callable[
-        [str, str, int], tuple[str, str, int, str, str, str]
+        [str, str, int, int], tuple[str, str, int, str, str, str]
     ],
     probe_azure_blob_object_access: Callable[
-        [str, str, str, int], tuple[int, str, str]
+        [str, str, str, int, int], tuple[int, str, str]
     ],
     azure_blob_object_probe_paths: tuple[str, ...],
     azure_blob_reference_url: str,
@@ -1251,7 +1255,11 @@ def collect_azure_blob_findings(
     with ThreadPoolExecutor(max_workers=context.threads) as pool:
         futures = {
             pool.submit(
-                check_single_azure_blob_container, account, container, context.timeout
+                check_single_azure_blob_container,
+                account,
+                container,
+                context.timeout,
+                context.azure_probe_retries,
             ): (
                 account,
                 container,
@@ -1289,7 +1297,11 @@ def collect_azure_blob_findings(
                         blob_object_probes += 1
                         object_status, object_error_code, object_url = (
                             probe_azure_blob_object_access(
-                                account, container, object_path, context.timeout
+                                account,
+                                container,
+                                object_path,
+                                context.timeout,
+                                context.azure_probe_retries,
                             )
                         )
                         if object_error_code:

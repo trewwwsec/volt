@@ -678,12 +678,13 @@ def collect_gcp_bucket_findings(
 
 
 def check_single_azure_blob_container(
-    account: str, container: str, timeout: int
+    account: str, container: str, timeout: int, azure_probe_retries: int = 0
 ) -> tuple[str, str, int, str, str, str]:
     return check_single_azure_blob_container_source(
         account,
         container,
         timeout,
+        azure_probe_retries=azure_probe_retries,
         fetch_url=fetch_url,
         parse_azure_error_code=parse_azure_error_code,
         classify_azure_blob_status=classify_azure_blob_status,
@@ -693,13 +694,18 @@ def check_single_azure_blob_container(
 
 
 def probe_azure_blob_object_access(
-    account: str, container: str, object_path: str, timeout: int
+    account: str,
+    container: str,
+    object_path: str,
+    timeout: int,
+    azure_probe_retries: int = 0,
 ) -> tuple[int, str, str]:
     return probe_azure_blob_object_access_source(
         account,
         container,
         object_path,
         timeout,
+        azure_probe_retries=azure_probe_retries,
         fetch_url=fetch_url,
         parse_azure_error_code=parse_azure_error_code,
         azure_blob_api_version=AZURE_BLOB_API_VERSION,

@@ -977,7 +977,12 @@ class SubreconPipelineTest(unittest.TestCase):
             "https://dns.google/resolve?name=app.example.com&type=CNAME",
         )
 
-        def fake_check(account: str, container: str, timeout: int):
+        def fake_check(
+            account: str,
+            container: str,
+            timeout: int,
+            azure_probe_retries: int = 0,
+        ):
             if account == "acmestorage" and container == "example":
                 return (
                     account,
@@ -1022,7 +1027,12 @@ class SubreconPipelineTest(unittest.TestCase):
             "https://dns.google/resolve?name=app.example.com&type=CNAME",
         )
 
-        def fake_check(account: str, container: str, timeout: int):
+        def fake_check(
+            account: str,
+            container: str,
+            timeout: int,
+            azure_probe_retries: int = 0,
+        ):
             if account == "acmestorage" and container == "$web":
                 return (
                     account,
@@ -1066,7 +1076,12 @@ class SubreconPipelineTest(unittest.TestCase):
             "https://dns.google/resolve?name=acmestorage.blob.core.windows.net&type=CNAME",
         )
 
-        def fake_check(account: str, container: str, timeout: int):
+        def fake_check(
+            account: str,
+            container: str,
+            timeout: int,
+            azure_probe_retries: int = 0,
+        ):
             if account == "acmestorage" and container == "example":
                 return (
                     account,
@@ -1111,7 +1126,12 @@ class SubreconPipelineTest(unittest.TestCase):
             "https://dns.google/resolve?name=app.example.com&type=CNAME",
         )
 
-        def fake_check(account: str, container: str, timeout: int):
+        def fake_check(
+            account: str,
+            container: str,
+            timeout: int,
+            azure_probe_retries: int = 0,
+        ):
             if container == "$web":
                 return (
                     account,
@@ -1171,7 +1191,12 @@ class SubreconPipelineTest(unittest.TestCase):
             "https://dns.google/resolve?name=app.example.com&type=CNAME",
         )
 
-        def fake_check(account: str, container: str, timeout: int):
+        def fake_check(
+            account: str,
+            container: str,
+            timeout: int,
+            azure_probe_retries: int = 0,
+        ):
             if container == "example":
                 return (
                     account,
@@ -1190,7 +1215,13 @@ class SubreconPipelineTest(unittest.TestCase):
                 "https://example",
             )
 
-        def fake_probe(account: str, container: str, object_path: str, timeout: int):
+        def fake_probe(
+            account: str,
+            container: str,
+            object_path: str,
+            timeout: int,
+            azure_probe_retries: int = 0,
+        ):
             if container == "example" and object_path == "index.html":
                 return (
                     200,
@@ -1379,6 +1410,42 @@ class SubreconPipelineTest(unittest.TestCase):
             mock_fetch_url.call_args_list[0].kwargs.get("retries"),
             subrecon.CLOUD_PROBE_HTTP_RETRIES,
         )
+
+    @patch("subrecon.fetch_url")
+    def test_check_single_azure_blob_container_respects_probe_retry_override(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.side_effect = [
+            (404, "<Error><Code>ContainerNotFound</Code></Error>", {}),
+        ]
+        subrecon.check_single_azure_blob_container(
+            "azureopendatastorage",
+            "definitely-not-real-container-xyz",
+            5,
+            azure_probe_retries=1,
+        )
+        self.assertEqual(mock_fetch_url.call_args_list[0].kwargs.get("retries"), 1)
+
+    @patch("subrecon.fetch_url")
+    def test_probe_azure_blob_object_access_respects_probe_retry_override(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.return_value = (
+            404,
+            "<Error><Code>BlobNotFound</Code></Error>",
+            {},
+        )
+        status, error_code, url = subrecon.probe_azure_blob_object_access(
+            "azureopendatastorage",
+            "$web",
+            "index.html",
+            5,
+            azure_probe_retries=1,
+        )
+        self.assertEqual(status, 404)
+        self.assertEqual(error_code, "BlobNotFound")
+        self.assertIn("/%24web/index.html", url)
+        self.assertEqual(mock_fetch_url.call_args_list[0].kwargs.get("retries"), 1)
 
     @patch("subrecon.fetch_url")
     def test_check_single_azure_blob_container_encodes_system_container_name(
@@ -1686,10 +1753,13 @@ class SubreconPipelineTest(unittest.TestCase):
         args = parser.parse_args(["-d", "example.com"])
         self.assertFalse(args.no_azure)
         self.assertFalse(args.azure_blob_object_probe)
+        self.assertEqual(args.azure_probe_retries, 0)
         args = parser.parse_args(["-d", "example.com", "--no-azure"])
         self.assertTrue(args.no_azure)
         args = parser.parse_args(["-d", "example.com", "--azure-object-probe"])
         self.assertTrue(args.azure_blob_object_probe)
+        args = parser.parse_args(["-d", "example.com", "--azure-probe-retries", "1"])
+        self.assertEqual(args.azure_probe_retries, 1)
 
     def test_build_parser_reliability_defaults(self) -> None:
         parser = subrecon.build_parser()

@@ -173,6 +173,16 @@ def build_parser(*, positive_int: Callable[[str], int]) -> argparse.ArgumentPars
             "(0=default conservative, 1=single retry with backoff)"
         ),
     )
+    parser.add_argument(
+        "--azure-probe-retries",
+        type=int,
+        choices=[0, 1],
+        default=0,
+        help=(
+            "Azure Blob probe retry budget for transient failures "
+            "(0=default conservative, 1=single retry with backoff)"
+        ),
+    )
 
     parser.add_argument(
         "--no-ct", action="store_true", help="Disable CT log collection"
@@ -267,6 +277,7 @@ def run_scan(
         gcp_dual_endpoint_probe=getattr(args, "gcp_dual_endpoint_probe", False),
         gcp_probe_retries=getattr(args, "gcp_probe_retries", 0),
         azure_blob_object_probe=getattr(args, "azure_blob_object_probe", False),
+        azure_probe_retries=getattr(args, "azure_probe_retries", 0),
     )
 
     print(f"[*] Passive scan started for {len(domains)} domain(s)")
@@ -423,6 +434,11 @@ def run_scan(
         legal_notes.append(
             "Azure object probing uses anonymous HEAD requests against selected blob "
             "paths to detect blob-public access when listing is denied."
+        )
+    if getattr(args, "azure_probe_retries", 0) > 0:
+        legal_notes.append(
+            "Azure probe retry budget is enabled for transient failures "
+            "(single retry with backoff)."
         )
 
     return {

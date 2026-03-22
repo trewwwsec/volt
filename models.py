@@ -38,3 +38,4 @@ class ScanContext:
     gcp_dual_endpoint_probe: bool = False
     gcp_probe_retries: int = 0
     azure_blob_object_probe: bool = False
+    azure_probe_retries: int = 0

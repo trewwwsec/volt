@@ -28,6 +28,7 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
   - Added run-level `source_health` to reports.
   - Added automatic S3 list-probe fallback for ambiguous HEAD responses.
   - Added pluggable search providers (`bing`, `commoncrawl`).
+  - Added passive subdomain takeover detection via CNAME + fingerprint matching.
 
 ## Phase 4: Quality Gates
 

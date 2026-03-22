@@ -58,6 +58,28 @@ class CoreHelpersTest(unittest.TestCase):
         out = subrecon.dedupe_findings([one, two])
         self.assertEqual(len(out), 2)
 
+    def test_dedupe_findings_takeover_ignores_title(self) -> None:
+        one = subrecon.Finding(
+            asset_type="subdomain_takeover",
+            asset="orphan.example.com",
+            severity="high",
+            confidence="high",
+            title="provider one",
+            description="",
+            source="takeover-fingerprint",
+        )
+        two = subrecon.Finding(
+            asset_type="subdomain_takeover",
+            asset="ORPHAN.EXAMPLE.COM",
+            severity="high",
+            confidence="high",
+            title="provider two",
+            description="",
+            source="takeover-fingerprint",
+        )
+        out = subrecon.dedupe_findings([one, two])
+        self.assertEqual(len(out), 1)
+
     def test_sanitize_bucket_label(self) -> None:
         self.assertEqual(subrecon.sanitize_bucket_label("Acme Corp..Prod__Logs"), "acme-corp.prod-logs")
 

@@ -330,6 +330,71 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(region, "us-east-1")
         self.assertEqual(list_status, 403)
 
+    def test_match_takeover_signature(self) -> None:
+        signature, cname = subrecon.match_takeover_signature(["foo.readthedocs.io"])
+        self.assertIsNotNone(signature)
+        self.assertEqual(cname, "foo.readthedocs.io")
+        self.assertEqual(signature["provider"], "Read the Docs")
+
+    @patch("subrecon.fetch_url")
+    def test_collect_subdomain_takeover_findings_detects_confirmed(self, mock_fetch_url) -> None:
+        mock_fetch_url.side_effect = [
+            # DNS-over-HTTPS CNAME query
+            (
+                200,
+                json.dumps(
+                    {
+                        "Answer": [
+                            {"name": "docs.example.com.", "type": 5, "data": "foo.readthedocs.io."}
+                        ]
+                    }
+                ),
+                {},
+            ),
+            # HTTPS landing page probe
+            (404, "The link you have followed or the URL that you entered does not exist.", {}),
+        ]
+        ctx = self._default_context()
+        health = subrecon.init_source_health("takeover")
+        findings = subrecon.collect_subdomain_takeover_findings(
+            ctx,
+            {"docs.example.com"},
+            health,
+        )
+        self.assertEqual(len(findings), 1)
+        finding = findings[0]
+        self.assertEqual(finding.asset_type, "subdomain_takeover")
+        self.assertEqual(finding.asset, "docs.example.com")
+        self.assertEqual(finding.severity, "high")
+        self.assertEqual(health["status"], "ok")
+        self.assertEqual(health["findings"], 1)
+
+    @patch("subrecon.fetch_url")
+    def test_collect_subdomain_takeover_findings_requires_fingerprint(self, mock_fetch_url) -> None:
+        mock_fetch_url.side_effect = [
+            (
+                200,
+                json.dumps(
+                    {
+                        "Answer": [
+                            {"name": "docs.example.com.", "type": 5, "data": "foo.readthedocs.io."}
+                        ]
+                    }
+                ),
+                {},
+            ),
+            (200, "Welcome to docs", {}),
+        ]
+        ctx = self._default_context()
+        health = subrecon.init_source_health("takeover")
+        findings = subrecon.collect_subdomain_takeover_findings(
+            ctx,
+            {"docs.example.com"},
+            health,
+        )
+        self.assertEqual(findings, [])
+        self.assertEqual(health["status"], "ok_no_results")
+
     def test_build_parser_rejects_non_positive_numeric_flags(self) -> None:
         parser = subrecon.build_parser()
         with contextlib.redirect_stderr(io.StringIO()):
@@ -347,6 +412,14 @@ class SubreconPipelineTest(unittest.TestCase):
         args = parser.parse_args(["-d", "example.com", "--no-s3-list-probe"])
         self.assertFalse(args.s3_list_probe)
 
+    def test_build_parser_takeover_default_and_disable_flag(self) -> None:
+        parser = subrecon.build_parser()
+        args = parser.parse_args(["-d", "example.com"])
+        self.assertFalse(args.no_takeover)
+        args = parser.parse_args(["-d", "example.com", "--no-takeover"])
+        self.assertTrue(args.no_takeover)
+
+    @patch("subrecon.collect_subdomain_takeover_findings")
     @patch("subrecon.collect_s3_bucket_findings")
     @patch("subrecon.collect_search_index_findings")
     @patch("subrecon.collect_ct_subdomains")
@@ -361,6 +434,7 @@ class SubreconPipelineTest(unittest.TestCase):
         mock_ct,
         mock_search,
         mock_s3,
+        mock_takeover,
     ) -> None:
         sf_finding = mk_finding("subdomain", "a.example.com", "info", "sf")
         ct_finding = mk_finding("subdomain", "a.example.com", "info", "ct")
@@ -377,6 +451,7 @@ class SubreconPipelineTest(unittest.TestCase):
         mock_ct.return_value = ({"a.example.com"}, [ct_finding])
         mock_search.return_value = ({"a.example.com"}, [search_finding])
         mock_s3.return_value = [s3_finding]
+        mock_takeover.return_value = []
 
         args = argparse.Namespace(
             domain="example.com",
@@ -396,6 +471,7 @@ class SubreconPipelineTest(unittest.TestCase):
             no_amass=False,
             no_search=False,
             no_s3=False,
+            no_takeover=False,
         )
         report = subrecon.run_scan(args)
 
@@ -405,6 +481,8 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(report["findings"][0]["severity"], "high")
         self.assertIn("source_health", report)
         self.assertIn("search", report["source_health"])
+        self.assertIn("takeover", report["source_health"])
+        mock_takeover.assert_called_once()
 
     def test_run_scan_rejects_unknown_search_provider(self) -> None:
         args = argparse.Namespace(
@@ -425,6 +503,7 @@ class SubreconPipelineTest(unittest.TestCase):
             no_amass=True,
             no_search=True,
             no_s3=True,
+            no_takeover=True,
         )
         with self.assertRaises(ValueError):
             subrecon.run_scan(args)

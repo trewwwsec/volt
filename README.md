@@ -1,10 +1,10 @@
 # subrecon
 
-`subrecon` is a passive perimeter intelligence scanner for domains/organizations.
+`subrecon` is a low-touch perimeter intelligence scanner for domains/organizations.
 
-It is designed for legal-safe OSINT workflows: no port scanning, no exploitation, no object retrieval.
+It is designed for legal-safe OSINT workflows: no port scanning, no exploitation, and no authenticated access attempts.
 
-## What It Does (Passive Only)
+## What It Does
 
 - Discovers subdomains from public Certificate Transparency records (`crt.sh`)
 - Optionally enriches passive subdomain coverage with:
@@ -17,6 +17,7 @@ It is designed for legal-safe OSINT workflows: no port scanning, no exploitation
   - backup/archive artifacts
   - `.git/config`
 - Generates likely S3 bucket names from organization/domain signals and checks bucket endpoints with `HEAD` plus automatic list-probe fallback (`ListObjectsV2` with `max-keys=0`) for ambiguous responses
+- Checks discovered subdomains for takeover signals using CNAME provider matching plus landing-page fingerprint validation
 - Produces a product-style JSON report with:
   - finding severity
   - confidence
@@ -29,6 +30,7 @@ It is designed for legal-safe OSINT workflows: no port scanning, no exploitation
 - No exploit attempts
 - No login attempts
 - No S3 object download
+- No deep content crawling
 
 ## Requirements
 
@@ -59,6 +61,12 @@ uv run python subrecon.py -d example.com -o perimeter_report.json
 
 ```bash
 uv run python subrecon.py -d example.com --keywords noaa-goes19 --no-ct --no-search --no-subfinder --no-amass -o s3_report.json
+```
+
+### Takeover-focused check
+
+```bash
+uv run python subrecon.py -d example.com --no-search --no-s3 -o takeover_report.json
 ```
 
 ### Search-only check using Common Crawl
@@ -112,6 +120,7 @@ uv run python subrecon.py -d example.com --no-search --no-s3
 --no-amass             Disable passive subdomain collection via amass
 --no-search            Disable search-index dorking
 --no-s3                Disable S3 bucket checks
+--no-takeover          Disable passive subdomain takeover fingerprint checks
 ```
 
 ## Search Providers
@@ -140,6 +149,7 @@ Common status values:
 
 - `ok`
 - `ok_no_results`
+- `ok_no_candidates`
 - `partial`
 - `error`
 - `disabled`
@@ -147,7 +157,7 @@ Common status values:
 
 A finding includes:
 
-- `asset_type` (`subdomain`, `indexed_leak`, `s3_bucket`)
+- `asset_type` (`subdomain`, `indexed_leak`, `s3_bucket`, `subdomain_takeover`)
 - `asset`
 - `severity`
 - `confidence`
@@ -166,7 +176,9 @@ A finding includes:
 ## Troubleshooting
 
 - If `subfinder`/`amass` return `0` hosts, increase `--tool-timeout` (for example `--tool-timeout 600`).
+- If `amass` fails with `flag provided but not defined: -src`, your installed amass version is incompatible with structured-source mode; upgrade amass or run with `--no-amass`.
 - Passive-source tools depend on network reachability and source/provider availability.
 - If S3 checks return `0` with an "ambiguous responses" note, AWS `HeadBucket` responses were inconclusive (generic `400/403/404` without enough signal). The tool automatically attempts an anonymous `ListObjectsV2` fallback probe (`max-keys=0`).
 - Use `--no-s3-list-probe` only if you need strict HEAD-only behavior.
 - If search findings are unexpectedly empty, run with `--search-providers commoncrawl` and check `source_health.search` in the report.
+- Takeover findings are signal-based; treat edge-case fingerprints as triage leads and verify ownership/claimability in an authorized workflow.

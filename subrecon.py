@@ -21,6 +21,49 @@ DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (compatible; subrecon-passive/1.0; +https://github.com/)"
 )
 SUPPORTED_SEARCH_PROVIDERS = {"bing", "commoncrawl"}
+TAKEOVER_REFERENCE_URL = "https://github.com/EdOverflow/can-i-take-over-xyz"
+TAKEOVER_SIGNATURES: list[dict[str, Any]] = [
+    {
+        "provider": "Read the Docs",
+        "cname_suffixes": ["readthedocs.io"],
+        "fingerprints": ["The link you have followed or the URL that you entered does not exist."],
+        "severity": "high",
+        "confidence": "high",
+        "edge_case": False,
+    },
+    {
+        "provider": "Bitbucket",
+        "cname_suffixes": ["bitbucket.io"],
+        "fingerprints": ["Repository not found"],
+        "severity": "high",
+        "confidence": "high",
+        "edge_case": False,
+    },
+    {
+        "provider": "Help Scout Docs",
+        "cname_suffixes": ["helpscoutdocs.com"],
+        "fingerprints": ["No settings were found for this company:"],
+        "severity": "high",
+        "confidence": "high",
+        "edge_case": False,
+    },
+    {
+        "provider": "Surge",
+        "cname_suffixes": ["surge.sh", "na-west1.surge.sh"],
+        "fingerprints": ["project not found"],
+        "severity": "high",
+        "confidence": "high",
+        "edge_case": False,
+    },
+    {
+        "provider": "GitHub Pages",
+        "cname_suffixes": ["github.io"],
+        "fingerprints": ["There isn't a GitHub Pages site here."],
+        "severity": "medium",
+        "confidence": "low",
+        "edge_case": True,
+    },
+]
 
 
 def log(msg: str, verbose: bool = False, force: bool = False) -> None:
@@ -402,6 +445,220 @@ def fetch_url(
         return 0, "", {}
     except Exception:
         return 0, "", {}
+
+
+def fetch_doh_cname_records(host: str, timeout: int) -> tuple[int, list[str], str]:
+    query_url = f"https://dns.google/resolve?name={parse.quote_plus(host)}&type=CNAME"
+    status, body, _ = fetch_url(
+        query_url,
+        timeout=timeout,
+        headers={"Accept": "application/dns-json"},
+    )
+    if status != 200 or not body.strip():
+        return status, [], query_url
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return status, [], query_url
+
+    answers = payload.get("Answer")
+    if not isinstance(answers, list):
+        return status, [], query_url
+
+    cnames: set[str] = set()
+    for answer in answers:
+        if not isinstance(answer, dict):
+            continue
+        data = answer.get("data")
+        if not isinstance(data, str):
+            continue
+        cname = normalize_domain(data.rstrip("."))
+        if cname:
+            cnames.add(cname)
+    return status, sorted(cnames), query_url
+
+
+def match_takeover_signature(cnames: list[str]) -> tuple[Optional[dict[str, Any]], str]:
+    for cname in cnames:
+        for signature in TAKEOVER_SIGNATURES:
+            suffixes = signature.get("cname_suffixes", [])
+            if not isinstance(suffixes, list):
+                continue
+            for raw_suffix in suffixes:
+                if not isinstance(raw_suffix, str):
+                    continue
+                suffix = normalize_domain(raw_suffix.rstrip("."))
+                if not suffix:
+                    continue
+                if cname == suffix or cname.endswith(f".{suffix}"):
+                    return signature, cname
+    return None, ""
+
+
+def probe_takeover_endpoint(host: str, timeout: int) -> tuple[str, int, str]:
+    for scheme in ("https", "http"):
+        url = f"{scheme}://{host}/"
+        status, body, _ = fetch_url(url, timeout=timeout)
+        if status != 0:
+            return url, status, body
+    return f"https://{host}/", 0, ""
+
+
+def match_takeover_fingerprint(
+    body: str, status: int, signature: dict[str, Any]
+) -> Optional[str]:
+    candidates = signature.get("fingerprints", [])
+    if not isinstance(candidates, list):
+        candidates = []
+    body_lower = body.lower()
+    for candidate in candidates:
+        if not isinstance(candidate, str):
+            continue
+        if candidate.lower() in body_lower:
+            return candidate
+    expected_status = signature.get("http_status")
+    if isinstance(expected_status, int) and expected_status == status:
+        return f"http_status={status}"
+    return None
+
+
+def collect_subdomain_takeover_findings(
+    context: ScanContext, hosts: set[str], health: Optional[dict[str, Any]] = None
+) -> list[Finding]:
+    stats = health if health is not None else init_source_health("takeover")
+    findings: list[Finding] = []
+    if not hosts:
+        stats["status"] = "ok_no_results"
+        stats["notes"].append("no discovered hosts available for takeover checks")
+        return findings
+
+    candidates = sorted(host for host in hosts if host and "." in host)
+    stats["queried"] = len(candidates)
+
+    def evaluate(host: str) -> tuple[str, Optional[dict[str, Any]]]:
+        doh_status, cnames, doh_url = fetch_doh_cname_records(host, context.timeout)
+        if doh_status == 0:
+            return "doh_error", {"host": host}
+        if not cnames:
+            return "no_cname", {"host": host, "doh_url": doh_url}
+
+        signature, matched_cname = match_takeover_signature(cnames)
+        if not signature:
+            return "no_signature_match", {"host": host, "doh_url": doh_url}
+
+        probe_url, probe_status, body = probe_takeover_endpoint(host, context.timeout)
+        if probe_status == 0:
+            return "probe_error", {"host": host, "doh_url": doh_url, "matched_cname": matched_cname}
+
+        fingerprint = match_takeover_fingerprint(body, probe_status, signature)
+        if not fingerprint:
+            return "no_fingerprint_match", {
+                "host": host,
+                "doh_url": doh_url,
+                "matched_cname": matched_cname,
+                "probe_url": probe_url,
+                "probe_status": probe_status,
+            }
+
+        return "confirmed", {
+            "host": host,
+            "doh_url": doh_url,
+            "cnames": cnames,
+            "matched_cname": matched_cname,
+            "probe_url": probe_url,
+            "probe_status": probe_status,
+            "fingerprint": fingerprint,
+            "signature": signature,
+        }
+
+    matched_cname_hosts = 0
+    edge_case_hits = 0
+    with ThreadPoolExecutor(max_workers=context.threads) as pool:
+        futures = {pool.submit(evaluate, host): host for host in candidates}
+        for fut in as_completed(futures):
+            try:
+                state, data = fut.result()
+            except Exception:
+                stats["errors"] += 1
+                continue
+
+            if state == "doh_error":
+                stats["errors"] += 1
+                continue
+            if state == "probe_error":
+                stats["errors"] += 1
+                matched_cname_hosts += 1
+                continue
+            if state != "confirmed" or data is None:
+                if state in {"no_fingerprint_match"}:
+                    matched_cname_hosts += 1
+                continue
+
+            signature = data["signature"]
+            provider = str(signature.get("provider", "Unknown provider"))
+            edge_case = bool(signature.get("edge_case"))
+            if edge_case:
+                edge_case_hits += 1
+
+            matched_cname_hosts += 1
+            title = f"Potential subdomain takeover via {provider}"
+            if edge_case:
+                title = f"Potential subdomain takeover signal via {provider} (edge case)"
+
+            findings.append(
+                Finding(
+                    asset_type="subdomain_takeover",
+                    asset=str(data["host"]),
+                    severity=str(signature.get("severity", "medium")),
+                    confidence=str(signature.get("confidence", "medium")),
+                    title=title,
+                    description=(
+                        "CNAME points to a known takeover-prone provider and the landing page "
+                        "matched an unclaimed-service fingerprint."
+                    ),
+                    source="takeover-fingerprint",
+                    tags=[
+                        "passive",
+                        "takeover",
+                        sanitize_bucket_label(provider.replace(" ", "-")),
+                        *(["edge-case"] if edge_case else []),
+                    ],
+                    evidence=[
+                        Evidence(
+                            source_url=str(data["doh_url"]),
+                            note=(
+                                f"CNAME chain: {', '.join(data['cnames'][:5])}; "
+                                f"matched={data['matched_cname']}"
+                            ),
+                        ),
+                        Evidence(
+                            source_url=str(data["probe_url"]),
+                            note=(
+                                f"HTTP status={data['probe_status']}; "
+                                f"matched fingerprint='{data['fingerprint']}'"
+                            ),
+                        ),
+                        Evidence(
+                            source_url=TAKEOVER_REFERENCE_URL,
+                            note="Provider fingerprint reference dataset.",
+                        ),
+                    ],
+                )
+            )
+
+    stats["candidate_hosts"] = len(candidates)
+    stats["cname_matches"] = matched_cname_hosts
+    stats["edge_case_hits"] = edge_case_hits
+    stats["hosts"] = len(findings)
+    stats["findings"] = len(findings)
+    if stats["errors"]:
+        stats["status"] = "partial" if findings else "error"
+    elif findings:
+        stats["status"] = "ok"
+    else:
+        stats["status"] = "ok_no_results"
+    return findings
 
 
 def collect_ct_subdomains(
@@ -1110,6 +1367,7 @@ def run_scan(args: argparse.Namespace) -> dict:
         "ct": init_source_health("crt.sh", enabled=not args.no_ct),
         "search": init_source_health("search", enabled=not args.no_search),
         "s3": init_source_health("s3", enabled=not args.no_s3),
+        "takeover": init_source_health("takeover", enabled=not args.no_takeover),
     }
     if not args.no_search:
         source_health["search"]["providers"] = {
@@ -1159,11 +1417,22 @@ def run_scan(args: argparse.Namespace) -> dict:
         findings.extend(s3_findings)
         print(f"    [s3] matching bucket names: {len(s3_findings)}")
 
+    if not args.no_takeover:
+        print("[*] Checking discovered subdomains for takeover fingerprints...")
+        takeover_findings = collect_subdomain_takeover_findings(
+            context,
+            discovered_hosts,
+            source_health["takeover"],
+        )
+        findings.extend(takeover_findings)
+        print(f"    [takeover] potential takeover findings: {len(takeover_findings)}")
+
     findings = dedupe_findings(findings)
 
     legal_notes = [
         "No direct port scanning or exploitation performed.",
         "Search/index signals require validation in an authorized workflow.",
+        "Takeover checks use DNS-over-HTTPS CNAME resolution and passive HTTP fingerprinting.",
     ]
     if args.s3_list_probe:
         legal_notes.append(
@@ -1205,7 +1474,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Passive perimeter discovery tool for domains/orgs using public OSINT "
-            "signals (CT logs, indexed exposure dorks, S3 bucket name checks)."
+            "signals (CT logs, indexed exposure dorks, S3 bucket checks, "
+            "and subdomain takeover fingerprints)."
         )
     )
 
@@ -1278,6 +1548,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-search", action="store_true", help="Disable search-index exposure dorks"
     )
     parser.add_argument("--no-s3", action="store_true", help="Disable S3 bucket checks")
+    parser.add_argument(
+        "--no-takeover",
+        action="store_true",
+        help="Disable passive subdomain takeover fingerprint checks",
+    )
 
     return parser
 

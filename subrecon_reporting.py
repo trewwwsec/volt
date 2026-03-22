@@ -9,7 +9,7 @@ def dedupe_findings(findings: list[Finding]) -> list[Finding]:
     seen: set[tuple[str, str, str]] = set()
     out: list[Finding] = []
     for finding in findings:
-        if finding.asset_type in {"subdomain", "s3_bucket"}:
+        if finding.asset_type in {"subdomain", "s3_bucket", "subdomain_takeover"}:
             key = (finding.asset_type, finding.asset.lower(), "")
         else:
             key = (finding.asset_type, finding.asset.lower(), finding.title.lower())

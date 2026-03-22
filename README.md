@@ -150,6 +150,8 @@ uv run subrecon -d example.com --no-search --no-s3
 --no-s3-list-probe     Disable anonymous ListObjectsV2 fallback probes
 --s3-website-probe     Enable optional S3 static website endpoint probe (default: disabled)
 --s3-probe-retries     Extra retry budget for S3 probes (choices: 0 or 1, default: 0)
+--gcp-dual-endpoint-probe Enable optional GCS virtual-hosted endpoint fallback probe
+--gcp-probe-retries    Extra retry budget for GCS probes (choices: 0 or 1, default: 0)
 --no-ct                Disable CT log collection
 --no-subfinder         Disable passive subdomain collection via subfinder
 --no-amass             Disable passive subdomain collection via amass
@@ -220,6 +222,8 @@ A finding includes:
 - Use `--no-s3-list-probe` only if you need strict HEAD-only behavior.
 - Use `--s3-website-probe` if you want additional static-site exposure signal (`s3-website-<region>` endpoints).
 - Use `--s3-probe-retries 1` in unstable environments; default remains `0` for low-noise behavior.
+- Use `--gcp-dual-endpoint-probe` for optional fallback probing on `<bucket>.storage.googleapis.com` when path-style responses are ambiguous.
+- Use `--gcp-probe-retries 1` in unstable environments; default remains `0` for conservative behavior.
 - If search findings are unexpectedly empty, run with `--search-providers commoncrawl` and check `source_health.search` in the report.
 - GCP bucket findings are heuristic (`200` strong signal, `403` likely-exists signal); treat low-severity bucket existence as triage leads.
 - Azure Blob findings currently report high-signal anonymous listability only (`HTTP 200` on list probes); `source_health.azure` still tracks inferred accounts/probe counts when no findings are returned.

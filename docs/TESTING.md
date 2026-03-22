@@ -10,7 +10,7 @@ Run all tests:
 uv run python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Current baseline (March 22, 2026): `78` tests passing.
+Current baseline (March 22, 2026): `88` tests passing.
 
 CI gate:
 
@@ -34,6 +34,7 @@ Current suite covers:
 - CT JSON parsing path
 - S3 `HEAD` + fallback `ListObjectsV2` classification path
 - S3 candidate validation filtering (reserved/invalid names), region-aware probe wiring, optional website probe path, and probe-retry override
+- GCS candidate validation filtering, domain-style candidate generation, XML error-code classification, second-phase object probe, optional dual-endpoint fallback, and probe-retry override
 - Azure Blob CNAME/account inference + anonymous list-probe classification path
 - Subdomain takeover CNAME/fingerprint detection path
 - HTTP retry/backoff behavior for transient fetch failures

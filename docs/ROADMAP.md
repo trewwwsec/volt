@@ -8,6 +8,7 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
 - Keep dependencies minimal (stdlib-first).
 - Add a small automated test baseline for core logic.
 - Keep CLI behavior stable while improving reliability.
+- Status: complete.
 
 ## Phase 2: Structure
 
@@ -17,7 +18,7 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
   - `sources` (ct/search/s3/tools)
   - `reporting`
 - Avoid introducing abstractions until they reduce code complexity.
-- Status: started. `models` and `reporting` were extracted first with no CLI behavior change.
+- Status: in progress. `models` and `reporting` were extracted first with no CLI behavior change.
 
 ## Phase 3: Reliability
 
@@ -29,6 +30,7 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
   - Added automatic S3 list-probe fallback for ambiguous HEAD responses.
   - Added pluggable search providers (`bing`, `commoncrawl`).
   - Added passive subdomain takeover detection via CNAME + fingerprint matching.
+  - Added curated takeover signatures with edge-case handling.
 
 ## Phase 4: Quality Gates
 
@@ -38,6 +40,7 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
 
 ## Immediate Next Actions
 
-1. Add lightweight retries/backoff for HTTP requests to reduce transient source failures.
-2. Refactor collectors into a `sources/` module package without changing report schema.
+1. Add amass CLI-version compatibility fallback when `-src` is unsupported.
+2. Add lightweight retries/backoff for HTTP requests to reduce transient source failures.
 3. Add one CI job for `uv run python -m unittest discover`.
+4. Refactor collectors into a `sources/` module package without changing report schema.

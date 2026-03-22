@@ -52,6 +52,7 @@ Install from this repository with `uv tool`:
 ```bash
 uv tool install --from . subrecon
 subrecon --help
+subrecon --version
 ```
 
 Install with `pipx`:
@@ -59,6 +60,7 @@ Install with `pipx`:
 ```bash
 pipx install .
 subrecon --help
+subrecon --version
 ```
 
 Script-first usage (`uv run python subrecon.py ...`) remains supported for compatibility, but command-first usage is now the default operator path.
@@ -138,6 +140,7 @@ uv run subrecon -d example.com --no-search --no-s3
 -d, --domain           Single root domain
 -dL, --domain-list     File with root domains
 -o, --output           Output JSON file (default: perimeter_report.json)
+--version              Show installed subrecon version and exit
 --organization         Organization name for better bucket candidate generation
 --keywords             Comma-separated org/brand keywords
 --search-providers     Comma-separated search providers (default: commoncrawl; optional: bing)
@@ -159,6 +162,8 @@ uv run subrecon -d example.com --no-search --no-s3
 --no-s3                Disable S3 bucket checks
 --no-gcp               Disable GCP bucket checks
 --no-azure             Disable Azure Blob container checks
+--azure-object-probe   Enable optional Azure blob-object probes when list access is denied
+--azure-probe-retries  Extra retry budget for Azure probes (choices: 0 or 1, default: 0)
 --no-takeover          Disable passive subdomain takeover fingerprint checks
 ```
 

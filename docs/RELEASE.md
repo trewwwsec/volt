@@ -25,9 +25,11 @@ Validate command-first install flows:
 ```bash
 uv tool install --from . subrecon
 subrecon --help
+subrecon --version
 
 pipx install .
 subrecon --help
+subrecon --version
 ```
 
 ## 3. Docs and Baseline Refresh
@@ -42,7 +44,7 @@ Before tagging:
 
 Tag sequence:
 
-1. Bump `project.version` in `pyproject.toml`.
+1. Bump `__version__` in `subrecon_version.py`.
 2. Commit release prep changes.
 3. Create annotated tag (example: `v0.1.0`).
 4. Push commit + tag.

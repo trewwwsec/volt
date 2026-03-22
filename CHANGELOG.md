@@ -9,6 +9,7 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 ### Added
 
 - Packaging metadata and installable `subrecon` CLI entry point for `uv tool install` and `pipx install`.
+- `--version` CLI flag and centralized version source-of-truth via `subrecon_version.py`.
 - Non-blocking scheduled/manual live-smoke GitHub Actions workflow (`.github/workflows/live-smoke.yml`).
 - Release governance docs: `SECURITY.md` and `docs/RELEASE.md`.
 

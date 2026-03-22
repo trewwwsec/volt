@@ -16,7 +16,16 @@ env/
 subdomains.json
 subdomains.txt
 jbl_com_subdomains.json
+s3_*.json
+mvp_*.json
+*_report.json
 
 # Editor/IDE
 .vscode/
 .idea/
+
+# Codex generated artifacts
+.codex/
+codex-out/
+.codex/conversion-manifest.json
+.codex-setup-backups/

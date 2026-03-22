@@ -223,3 +223,46 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
 5. PR5: Optional dual-endpoint fallback behavior + tests.
 6. PR6: Confidence guardrails for generic-name collisions + report note updates.
 7. PR7: Optional GCS probe retry budget + reliability tests + live-smoke refresh.
+
+### Azure Blob: High-Impact Enumeration + Detection Plan (Research-Based)
+
+1. Expand endpoint/suffix coverage beyond `blob.core.windows.net`.
+   - Add support for sovereign suffixes (for example `core.usgovcloudapi.net`, `core.chinacloudapi.cn`) and new DNS-zone endpoint patterns (`<account>.z[00-99].blob.storage.azure.net`).
+   - Why: account discovery and validation currently miss real-world non-default endpoint shapes.
+
+2. Strengthen CNAME-driven account discovery from discovered hostnames.
+   - Detect blob-service endpoints, static website endpoints (`*.web.core.windows.net`), and map custom-domain CNAMEs back to storage accounts.
+   - Why: enterprise targets frequently expose storage through custom domains, not raw account hostnames.
+
+3. Add system-container coverage for high-signal exposure paths.
+   - Probe reserved/system containers with encoded names where applicable (`$web`, `$root`, `$logs`) in addition to generated names.
+   - Why: static website hosting auto-creates `$web`, and these containers are high-value exposure surfaces.
+
+4. Improve Azure probe pipeline to be endpoint-aware and deterministic.
+   - Keep current anonymous list probe, but add/standardize container `HEAD` checks (`restype=container`) with explicit API version handling before/alongside list probes.
+   - Why: live behavior differs materially by endpoint and API version, affecting reliability and false negatives.
+
+5. Use error-code-driven classification (not status-only).
+   - Prioritize `x-ms-error-code` + XML `<Code>` semantics in classification (`NoAuthenticationInformation`, `AuthenticationFailed`, `ContainerNotFound`, `ResourceNotFound`, `FeatureVersionMismatch`).
+   - Why: same HTTP status can map to very different meanings for account/container existence and publicability.
+
+6. Add optional blob-level anonymous-read checks when list is denied.
+   - For containers likely configured as blob-public (not container-public), add lightweight object probes (HEAD-first) for common static paths.
+   - Why: list-denied does not always mean blob reads are denied; current list-only logic can miss real exposures.
+
+7. Add account-first probe caching and scheduling.
+   - Resolve/account-check once, then fan out container probes only when account reachability is confirmed/likely.
+   - Why: reduces wasted probes, improves runtime, and increases confidence consistency per account.
+
+8. Expand Azure source-health telemetry for operator triage.
+   - Add counters for `account_resolved`, `account_unresolved`, `error_code_counts`, `system_container_hits`, `blob_only_hits`, and `ambiguous`.
+   - Why: clear diagnostics make degraded-mode and confidence decisions actionable.
+
+### Azure Blob Implementation Order (Small PR-Style Sequence)
+
+1. PR1: Endpoint suffix expansion + DNS-zone endpoint parsing + account inference upgrades.
+2. PR2: System-container coverage (`$web/$root/$logs`) + validator updates/tests.
+3. PR3: Error-code classification matrix + normalized Azure error telemetry.
+4. PR4: Endpoint-aware probe orchestration (HEAD/list ordering + account-first caching).
+5. PR5: Optional blob-only anonymous-read probes for list-denied cases.
+6. PR6: Optional Azure probe retry budget + reliability/live-smoke refresh.

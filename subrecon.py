@@ -600,12 +600,16 @@ def classify_gcp_status(status: int, error_code: str = "") -> str:
 
 
 def probe_gcp_list_access(
-    bucket: str, timeout: int, virtual_hosted: bool = False
+    bucket: str,
+    timeout: int,
+    virtual_hosted: bool = False,
+    gcp_probe_retries: int = 0,
 ) -> tuple[int, str]:
     return probe_gcp_list_access_source(
         bucket,
         timeout,
         virtual_hosted,
+        gcp_probe_retries,
         fetch_url=fetch_url,
         parse_gcp_error_code=parse_gcp_error_code,
         cloud_probe_http_retries=CLOUD_PROBE_HTTP_RETRIES,
@@ -613,12 +617,16 @@ def probe_gcp_list_access(
 
 
 def probe_gcp_object_access(
-    bucket: str, timeout: int, virtual_hosted: bool = False
+    bucket: str,
+    timeout: int,
+    virtual_hosted: bool = False,
+    gcp_probe_retries: int = 0,
 ) -> tuple[int, str]:
     return probe_gcp_object_access_source(
         bucket,
         timeout,
         virtual_hosted,
+        gcp_probe_retries,
         fetch_url=fetch_url,
         parse_gcp_error_code=parse_gcp_error_code,
         cloud_probe_http_retries=CLOUD_PROBE_HTTP_RETRIES,
@@ -626,12 +634,16 @@ def probe_gcp_object_access(
 
 
 def check_single_gcp_bucket_exists(
-    bucket: str, timeout: int, gcp_dual_endpoint_probe: bool = False
+    bucket: str,
+    timeout: int,
+    gcp_dual_endpoint_probe: bool = False,
+    gcp_probe_retries: int = 0,
 ) -> tuple[str, Optional[int], str, Optional[int]]:
     return check_single_gcp_bucket_exists_source(
         bucket,
         timeout,
         gcp_dual_endpoint_probe=gcp_dual_endpoint_probe,
+        gcp_probe_retries=gcp_probe_retries,
         fetch_url=fetch_url,
         classify_gcp_status=classify_gcp_status,
         probe_gcp_list_access=probe_gcp_list_access,

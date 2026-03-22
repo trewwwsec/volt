@@ -712,17 +712,17 @@ def probe_gcp_list_access(
     bucket: str,
     timeout: int,
     virtual_hosted: bool = False,
+    gcp_probe_retries: int = 0,
     *,
     fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
     parse_gcp_error_code: Callable[[str], str],
     cloud_probe_http_retries: int,
 ) -> tuple[int, str]:
+    retries = max(cloud_probe_http_retries, int(gcp_probe_retries))
     url = (
         f"{build_gcp_xml_api_endpoint(bucket, virtual_hosted)}/?list-type=2&max-keys=1"
     )
-    status, body, _ = fetch_url(
-        url, timeout=timeout, method="GET", retries=cloud_probe_http_retries
-    )
+    status, body, _ = fetch_url(url, timeout=timeout, method="GET", retries=retries)
     return status, parse_gcp_error_code(body)
 
 
@@ -730,16 +730,16 @@ def probe_gcp_object_access(
     bucket: str,
     timeout: int,
     virtual_hosted: bool = False,
+    gcp_probe_retries: int = 0,
     *,
     fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
     parse_gcp_error_code: Callable[[str], str],
     cloud_probe_http_retries: int,
 ) -> tuple[int, str]:
+    retries = max(cloud_probe_http_retries, int(gcp_probe_retries))
     probe_key = f"__subrecon_probe__{time_ns()}"
     url = f"{build_gcp_xml_api_endpoint(bucket, virtual_hosted)}/{probe_key}"
-    status, body, _ = fetch_url(
-        url, timeout=timeout, method="GET", retries=cloud_probe_http_retries
-    )
+    status, body, _ = fetch_url(url, timeout=timeout, method="GET", retries=retries)
     return status, parse_gcp_error_code(body)
 
 
@@ -747,25 +747,28 @@ def check_single_gcp_bucket_exists(
     bucket: str,
     timeout: int,
     gcp_dual_endpoint_probe: bool = False,
+    gcp_probe_retries: int = 0,
     *,
     fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
     classify_gcp_status: Callable[[int, str], str],
-    probe_gcp_list_access: Callable[[str, int, bool], tuple[int, str]],
-    probe_gcp_object_access: Callable[[str, int, bool], tuple[int, str]],
+    probe_gcp_list_access: Callable[[str, int, bool, int], tuple[int, str]],
+    probe_gcp_object_access: Callable[[str, int, bool, int], tuple[int, str]],
     parse_gcp_error_code: Callable[[str], str],
     cloud_probe_http_retries: int,
 ) -> tuple[str, Optional[int], str, Optional[int]]:
+    retries = max(cloud_probe_http_retries, int(gcp_probe_retries))
+
     def evaluate_endpoint(virtual_hosted: bool) -> tuple[int, str, Optional[int]]:
         url = f"{build_gcp_xml_api_endpoint(bucket, virtual_hosted)}/"
         status, body, _ = fetch_url(
-            url, timeout=timeout, method="HEAD", retries=cloud_probe_http_retries
+            url, timeout=timeout, method="HEAD", retries=retries
         )
         existence = classify_gcp_status(status, parse_gcp_error_code(body))
         list_status: Optional[int] = None
 
         if existence == "unknown":
             list_status, list_error_code = probe_gcp_list_access(
-                bucket, timeout, virtual_hosted
+                bucket, timeout, virtual_hosted, gcp_probe_retries
             )
             list_existence = classify_gcp_status(list_status, list_error_code)
             if list_existence != "unknown":
@@ -773,7 +776,7 @@ def check_single_gcp_bucket_exists(
 
         if existence == "unknown":
             object_status, object_error_code = probe_gcp_object_access(
-                bucket, timeout, virtual_hosted
+                bucket, timeout, virtual_hosted, gcp_probe_retries
             )
             object_existence = classify_gcp_status(object_status, object_error_code)
             if object_existence != "unknown":
@@ -804,7 +807,7 @@ def collect_gcp_bucket_findings(
     *,
     build_gcp_bucket_wordlist: Callable[[ScanContext, set[str]], set[str]],
     check_single_gcp_bucket_exists: Callable[
-        [str, int, bool], tuple[str, Optional[int], str, Optional[int]]
+        [str, int, bool, int], tuple[str, Optional[int], str, Optional[int]]
     ],
     validate_gcp_bucket_name: Callable[[str], tuple[bool, str]],
     log: Callable[[str, bool, bool], None],
@@ -895,6 +898,7 @@ def collect_gcp_bucket_findings(
                 bucket,
                 context.timeout,
                 context.gcp_dual_endpoint_probe,
+                context.gcp_probe_retries,
             ): bucket
             for bucket in candidates
         }

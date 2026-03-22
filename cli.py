@@ -163,6 +163,16 @@ def build_parser(*, positive_int: Callable[[str], int]) -> argparse.ArgumentPars
             "(<bucket>.storage.googleapis.com) when path-style probing is ambiguous"
         ),
     )
+    parser.add_argument(
+        "--gcp-probe-retries",
+        type=int,
+        choices=[0, 1],
+        default=0,
+        help=(
+            "GCS probe retry budget for transient failures "
+            "(0=default conservative, 1=single retry with backoff)"
+        ),
+    )
 
     parser.add_argument(
         "--no-ct", action="store_true", help="Disable CT log collection"
@@ -246,6 +256,7 @@ def run_scan(
         s3_website_probe=getattr(args, "s3_website_probe", False),
         s3_probe_retries=getattr(args, "s3_probe_retries", 0),
         gcp_dual_endpoint_probe=getattr(args, "gcp_dual_endpoint_probe", False),
+        gcp_probe_retries=getattr(args, "gcp_probe_retries", 0),
     )
 
     print(f"[*] Passive scan started for {len(domains)} domain(s)")

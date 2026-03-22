@@ -734,7 +734,10 @@ class SubreconPipelineTest(unittest.TestCase):
         self, mock_gcp_check
     ) -> None:
         def fake_check(
-            bucket: str, timeout: int, gcp_dual_endpoint_probe: bool = False
+            bucket: str,
+            timeout: int,
+            gcp_dual_endpoint_probe: bool = False,
+            gcp_probe_retries: int = 0,
         ):
             if bucket == "mybucket":
                 return bucket, 200, "confirmed_exists", None
@@ -776,7 +779,10 @@ class SubreconPipelineTest(unittest.TestCase):
         self, mock_gcp_check
     ) -> None:
         def fake_check(
-            bucket: str, timeout: int, gcp_dual_endpoint_probe: bool = False
+            bucket: str,
+            timeout: int,
+            gcp_dual_endpoint_probe: bool = False,
+            gcp_probe_retries: int = 0,
         ):
             if bucket == "backup":
                 return bucket, 403, "likely_exists", None
@@ -798,7 +804,10 @@ class SubreconPipelineTest(unittest.TestCase):
         self, mock_gcp_check
     ) -> None:
         def fake_check(
-            bucket: str, timeout: int, gcp_dual_endpoint_probe: bool = False
+            bucket: str,
+            timeout: int,
+            gcp_dual_endpoint_probe: bool = False,
+            gcp_probe_retries: int = 0,
         ):
             if bucket == "backup":
                 return bucket, 403, "likely_exists", None
@@ -875,6 +884,21 @@ class SubreconPipelineTest(unittest.TestCase):
             "https://examplebucket.storage.googleapis.com/",
             mock_fetch_url.call_args_list[3].args[0],
         )
+
+    @patch("subrecon.fetch_url")
+    def test_check_single_gcp_bucket_exists_respects_gcp_probe_retry_override(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.side_effect = [
+            (404, "", {}),
+            (404, "<Error><Code>NoSuchBucket</Code></Error>", {}),
+        ]
+        subrecon.check_single_gcp_bucket_exists(
+            "retry-test-gcs-bucket",
+            5,
+            gcp_probe_retries=1,
+        )
+        self.assertEqual(mock_fetch_url.call_args_list[0].kwargs.get("retries"), 1)
 
     @patch("builtins.print")
     @patch("subrecon.check_single_bucket_exists")
@@ -1360,10 +1384,13 @@ class SubreconPipelineTest(unittest.TestCase):
         args = parser.parse_args(["-d", "example.com"])
         self.assertFalse(args.no_gcp)
         self.assertFalse(args.gcp_dual_endpoint_probe)
+        self.assertEqual(args.gcp_probe_retries, 0)
         args = parser.parse_args(["-d", "example.com", "--no-gcp"])
         self.assertTrue(args.no_gcp)
         args = parser.parse_args(["-d", "example.com", "--gcp-dual-endpoint-probe"])
         self.assertTrue(args.gcp_dual_endpoint_probe)
+        args = parser.parse_args(["-d", "example.com", "--gcp-probe-retries", "1"])
+        self.assertEqual(args.gcp_probe_retries, 1)
 
     def test_build_parser_azure_default_and_disable_flag(self) -> None:
         parser = subrecon.build_parser()

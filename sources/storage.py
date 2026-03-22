@@ -47,6 +47,45 @@ def validate_s3_bucket_name(value: str) -> tuple[bool, str]:
     return True, ""
 
 
+def validate_gcp_bucket_name(value: str) -> tuple[bool, str]:
+    candidate = value.strip().lower()
+    if not candidate:
+        return False, "empty"
+    if not re.fullmatch(r"[a-z0-9._-]+", candidate):
+        return False, "charset"
+    if not candidate[0].isalnum() or not candidate[-1].isalnum():
+        return False, "charset_or_boundary"
+    if len(candidate) < 3:
+        return False, "length"
+
+    if "." in candidate:
+        if len(candidate) > 222:
+            return False, "length"
+        if ".." in candidate:
+            return False, "adjacent_periods"
+        for part in candidate.split("."):
+            if not (1 <= len(part) <= 63):
+                return False, "dot_component_length"
+            if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", part):
+                return False, "dot_component_syntax"
+    elif len(candidate) > 63:
+        return False, "length"
+
+    try:
+        ip_address(candidate)
+        return False, "ip_address_style"
+    except ValueError:
+        pass
+
+    if candidate.startswith("goog"):
+        return False, "reserved_prefix"
+    reserved_substrings = ("google", "g00gle", "g0ogle", "go0gle")
+    if any(part in candidate for part in reserved_substrings):
+        return False, "reserved_substring"
+
+    return True, ""
+
+
 def sanitize_azure_container_label(value: str) -> str:
     cleaned = re.sub(r"[^a-z0-9-]", "-", value.lower())
     cleaned = re.sub(r"-{2,}", "-", cleaned)
@@ -645,12 +684,33 @@ def collect_gcp_bucket_findings(
     check_single_gcp_bucket_exists: Callable[
         [str, int], tuple[str, Optional[int], str, Optional[int]]
     ],
+    validate_gcp_bucket_name: Callable[[str], tuple[bool, str]],
     log: Callable[[str, bool, bool], None],
 ) -> list[Finding]:
     findings: list[Finding] = []
-    candidates = sorted(build_bucket_wordlist(context, hosts))
+    raw_candidates = sorted(build_bucket_wordlist(context, hosts))
+    reason_counts: dict[str, int] = {}
+    candidates: list[str] = []
+    for candidate in raw_candidates:
+        valid, reason = validate_gcp_bucket_name(candidate)
+        if valid:
+            candidates.append(candidate)
+            continue
+        if reason:
+            reason_counts[reason] = int(reason_counts.get(reason, 0)) + 1
+
+    stats["raw_candidates"] = len(raw_candidates)
+    stats["filtered_invalid_candidates"] = len(raw_candidates) - len(candidates)
+    stats["filtered_reasons"] = reason_counts
+    stats["filtered_reserved_name"] = int(
+        reason_counts.get("reserved_prefix", 0)
+    ) + int(reason_counts.get("reserved_substring", 0))
     if not candidates:
         stats["status"] = "ok_no_candidates"
+        if raw_candidates:
+            stats["notes"].append(
+                "all generated GCS candidates were invalid by naming rules"
+            )
         return findings
 
     stats["queried"] = len(candidates)

@@ -671,6 +671,25 @@ class SubreconPipelineTest(unittest.TestCase):
             (False, "ip_address_style"),
         )
 
+    def test_validate_gcp_bucket_name_filters_reserved_and_invalid(self) -> None:
+        self.assertEqual(subrecon.validate_gcp_bucket_name("valid-bucket"), (True, ""))
+        self.assertEqual(
+            subrecon.validate_gcp_bucket_name("assets.example.com"),
+            (True, ""),
+        )
+        self.assertEqual(
+            subrecon.validate_gcp_bucket_name("goog-bucket"),
+            (False, "reserved_prefix"),
+        )
+        self.assertEqual(
+            subrecon.validate_gcp_bucket_name("my-g00gle-bucket"),
+            (False, "reserved_substring"),
+        )
+        self.assertEqual(
+            subrecon.validate_gcp_bucket_name("192.168.0.1"),
+            (False, "ip_address_style"),
+        )
+
     @patch("builtins.print")
     @patch("subrecon.check_single_bucket_exists")
     def test_collect_s3_bucket_findings_skips_unknown_signals(
@@ -713,6 +732,21 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(by_asset["example"].severity, "low")
         self.assertEqual(
             by_asset["example"].title, "GCP bucket name likely exists (HTTP signal)"
+        )
+
+    def test_collect_gcp_bucket_findings_filters_invalid_candidates(self) -> None:
+        ctx = self._default_context()
+        ctx.domains = []
+        ctx.organization = ""
+        ctx.keywords = ["goog-sensitive"]
+        health = subrecon.init_source_health("gcp")
+        findings = subrecon.collect_gcp_bucket_findings(ctx, hosts=set(), health=health)
+        self.assertEqual(findings, [])
+        self.assertEqual(health.get("status"), "ok_no_candidates")
+        self.assertGreater(health.get("raw_candidates", 0), 0)
+        self.assertGreater(health.get("filtered_invalid_candidates", 0), 0)
+        self.assertGreater(
+            health.get("filtered_reasons", {}).get("reserved_prefix", 0), 0
         )
 
     @patch("builtins.print")

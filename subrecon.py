@@ -86,6 +86,7 @@ from sources.storage import (
     probe_s3_website_access as probe_s3_website_access_source,
     sanitize_azure_container_label as sanitize_azure_container_label_source,
     sanitize_bucket_label as sanitize_bucket_label_source,
+    validate_gcp_bucket_name as validate_gcp_bucket_name_source,
     validate_s3_bucket_name as validate_s3_bucket_name_source,
 )
 from sources.takeover import (
@@ -437,6 +438,10 @@ def validate_s3_bucket_name(value: str) -> tuple[bool, str]:
     return validate_s3_bucket_name_source(value)
 
 
+def validate_gcp_bucket_name(value: str) -> tuple[bool, str]:
+    return validate_gcp_bucket_name_source(value)
+
+
 def is_valid_azure_container_name(value: str) -> bool:
     return is_valid_azure_container_name_source(value)
 
@@ -608,6 +613,7 @@ def collect_gcp_bucket_findings(
         stats,
         build_bucket_wordlist=build_bucket_wordlist,
         check_single_gcp_bucket_exists=check_single_gcp_bucket_exists,
+        validate_gcp_bucket_name=validate_gcp_bucket_name,
         log=log,
     )
 

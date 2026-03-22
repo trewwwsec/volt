@@ -10,7 +10,7 @@ Run all tests:
 uv run python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Current baseline (March 22, 2026): `88` tests passing.
+Current baseline (March 22, 2026): `98` tests passing.
 
 CI gate:
 
@@ -35,7 +35,8 @@ Current suite covers:
 - S3 `HEAD` + fallback `ListObjectsV2` classification path
 - S3 candidate validation filtering (reserved/invalid names), region-aware probe wiring, optional website probe path, and probe-retry override
 - GCS candidate validation filtering, domain-style candidate generation, XML error-code classification, second-phase object probe, optional dual-endpoint fallback, and probe-retry override
-- Azure Blob CNAME/account inference + anonymous list-probe classification path
+- Azure Blob CNAME/account inference + endpoint-aware HEAD/list classification path
+- Azure Blob optional blob-object probe path and optional probe-retry override
 - Subdomain takeover CNAME/fingerprint detection path
 - HTTP retry/backoff behavior for transient fetch failures
 - Source-specific retry policy wiring (CT/search/takeover vs cloud probes)
@@ -79,6 +80,9 @@ uv run subrecon -d gcp-public-data.test --keywords gcp-public-data-landsat --no-
 # Azure Blob probe check (public container target)
 uv run python -c "import subrecon; print(subrecon.check_single_azure_blob_container('azureopendatastorage','nyctlc',10))"
 
+# Azure Blob probe check with retry override
+uv run python -c "import subrecon; print(subrecon.check_single_azure_blob_container('azureopendatastorage','nyctlc',10, azure_probe_retries=1))"
+
 # Takeover path (inventory + takeover only)
 uv run subrecon -d example.com --no-search --no-s3 --no-gcp --no-azure --no-ct -o /tmp/subrecon_takeover_smoke.json
 
@@ -97,7 +101,7 @@ Environment: local macOS runner, passive internet-reachable execution.
 - Search-only Common Crawl (`/tmp/subrecon_search_smoke.json`): `source_health.search.status=partial`, `summary.total_findings=4`
 - S3-only (`/tmp/subrecon_s3_smoke.json`): `source_health.s3.status=ok`, `s3.ambiguous=0`, `summary.total_findings=1` (`noaa-goes19`)
 - GCS-only (`/tmp/subrecon_gcp_smoke.json`): `source_health.gcp.status=ok`, `summary.total_findings=2`
-- Azure direct probe (`check_single_azure_blob_container`): `status=200`, `existence=confirmed_public` on `azureopendatastorage/nyctlc`
+- Azure direct probe (`check_single_azure_blob_container`): `status=200`, `existence=confirmed_public` on `azureopendatastorage/nyctlc` with default retries and `azure_probe_retries=1`
 - Takeover-focused (`/tmp/subrecon_takeover_smoke.json`): run as CT+takeover (`--no-subfinder --no-amass`) to keep runtime bounded; `source_health.takeover.status=ok_no_results`, `summary.total_findings=6` (CT inventory findings)
 
 ## Rigorous Live Matrix (Bounded E2E)
@@ -131,6 +135,9 @@ uv run subrecon -d iana.org --no-ct --no-subfinder --no-search --no-s3 --no-gcp 
 
 # Azure direct probe
 uv run python -c "import subrecon; print(subrecon.check_single_azure_blob_container('azureopendatastorage','nyctlc',10))"
+
+# Azure direct probe (retry override)
+uv run python -c "import subrecon; print(subrecon.check_single_azure_blob_container('azureopendatastorage','nyctlc',10, azure_probe_retries=1))"
 ```
 
 ### Latest Rigorous Matrix Snapshot (March 22, 2026)
@@ -145,7 +152,7 @@ Environment: local macOS runner, passive internet-reachable execution.
 - Takeover+CT (`/tmp/subrecon_live3_takeover_ct_iana.json`): `ct=ok`, `takeover=ok_no_results`, `summary.total_findings=21`
 - Subfinder-only (`/tmp/subrecon_live3_subfinder_only_iana.json`): `source_health.subfinder=ok`, `summary.total_findings=65`
 - Amass-only (`/tmp/subrecon_live3_amass_only_iana.json`): `source_health.amass=partial`, `timeouts=1`, `errors=0`, `error_types.amass_timeout=1`, `summary.total_findings=0`
-- Azure direct probe: `status=200`, `existence=confirmed_public` on `azureopendatastorage/nyctlc`
+- Azure direct probe: `status=200`, `existence=confirmed_public` on `azureopendatastorage/nyctlc` with default retries and `azure_probe_retries=1`
 
 ### Exegol Validation Snapshot (March 22, 2026)
 

@@ -17,7 +17,7 @@ def parse_search_providers(
     value: Optional[str], *, supported_search_providers: set[str]
 ) -> list[str]:
     if not value:
-        return ["bing", "commoncrawl"]
+        return ["commoncrawl"]
     ordered: list[str] = []
     for item in value.split(","):
         provider = item.strip().lower()
@@ -95,8 +95,8 @@ def build_parser(*, positive_int: Callable[[str], int]) -> argparse.ArgumentPars
     )
     parser.add_argument(
         "--search-providers",
-        default="bing,commoncrawl",
-        help="Comma-separated search providers (supported: bing, commoncrawl)",
+        default="commoncrawl",
+        help="Comma-separated search providers (default: commoncrawl; optional: bing)",
     )
     parser.add_argument(
         "--timeout", type=positive_int, default=10, help="HTTP timeout seconds"

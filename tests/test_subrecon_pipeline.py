@@ -117,6 +117,10 @@ class SubreconPipelineTest(unittest.TestCase):
 
     def test_parse_search_providers(self) -> None:
         self.assertEqual(
+            subrecon.parse_search_providers(None),
+            ["commoncrawl"],
+        )
+        self.assertEqual(
             subrecon.parse_search_providers("bing,commoncrawl,bing"),
             ["bing", "commoncrawl"],
         )
@@ -1121,6 +1125,15 @@ class SubreconPipelineTest(unittest.TestCase):
         args = parser.parse_args(["-d", "example.com"])
         self.assertEqual(args.tool_timeout, 120)
         self.assertEqual(args.max_bucket_candidates, 300)
+
+    def test_build_parser_search_provider_default_and_override(self) -> None:
+        parser = subrecon.build_parser()
+        args = parser.parse_args(["-d", "example.com"])
+        self.assertEqual(args.search_providers, "commoncrawl")
+        args = parser.parse_args(
+            ["-d", "example.com", "--search-providers", "bing,commoncrawl"]
+        )
+        self.assertEqual(args.search_providers, "bing,commoncrawl")
 
     @patch("subrecon.collect_subdomain_takeover_findings")
     @patch("subrecon.collect_azure_blob_findings")

@@ -1,1 +1,1 @@
-"""Source collectors package."""
+"""Source collector modules for subrecon."""

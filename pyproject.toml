@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "Passive perimeter intelligence scanner for domains and organizations."
 requires-python = ">=3.10"
 
+[dependency-groups]
+dev = ["ruff>=0.11,<1.0"]
+
 [tool.uv]
 package = false
 

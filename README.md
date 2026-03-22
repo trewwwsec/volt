@@ -51,9 +51,9 @@ It is designed for legal-safe OSINT workflows: no port scanning, no exploitation
 - Run tests:
   - `uv run python -m unittest discover -s tests -p "test_*.py"`
 - Run lint:
-  - `uvx ruff check .`
+  - `uv run ruff check .`
 - Check formatting:
-  - `uvx ruff format --check .`
+  - `uv run ruff format --check .`
 
 Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md)
 Testing: [docs/TESTING.md](docs/TESTING.md)

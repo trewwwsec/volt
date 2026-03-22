@@ -82,6 +82,7 @@ from sources.storage import (
     parse_azure_error_code as parse_azure_error_code_source,
     parse_gcp_error_code as parse_gcp_error_code_source,
     parse_s3_error_code as parse_s3_error_code_source,
+    probe_gcp_object_access as probe_gcp_object_access_source,
     probe_gcp_list_access as probe_gcp_list_access_source,
     probe_s3_object_access as probe_s3_object_access_source,
     probe_s3_list_access as probe_s3_list_access_source,
@@ -608,6 +609,16 @@ def probe_gcp_list_access(bucket: str, timeout: int) -> tuple[int, str]:
     )
 
 
+def probe_gcp_object_access(bucket: str, timeout: int) -> tuple[int, str]:
+    return probe_gcp_object_access_source(
+        bucket,
+        timeout,
+        fetch_url=fetch_url,
+        parse_gcp_error_code=parse_gcp_error_code,
+        cloud_probe_http_retries=CLOUD_PROBE_HTTP_RETRIES,
+    )
+
+
 def check_single_gcp_bucket_exists(
     bucket: str, timeout: int
 ) -> tuple[str, Optional[int], str, Optional[int]]:
@@ -617,6 +628,7 @@ def check_single_gcp_bucket_exists(
         fetch_url=fetch_url,
         classify_gcp_status=classify_gcp_status,
         probe_gcp_list_access=probe_gcp_list_access,
+        probe_gcp_object_access=probe_gcp_object_access,
         parse_gcp_error_code=parse_gcp_error_code,
         cloud_probe_http_retries=CLOUD_PROBE_HTTP_RETRIES,
     )

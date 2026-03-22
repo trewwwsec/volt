@@ -786,6 +786,28 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(list_status, 404)
         self.assertEqual(mock_fetch_url.call_count, 2)
 
+    @patch("subrecon.fetch_url")
+    def test_check_single_gcp_bucket_exists_uses_object_probe_for_nosuchkey(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.side_effect = [
+            (404, "", {}),
+            (404, "<Error><Code>NotFound</Code></Error>", {}),
+            (404, "<Error><Code>NoSuchKey</Code></Error>", {}),
+        ]
+        _, status, existence, list_status = subrecon.check_single_gcp_bucket_exists(
+            "gcp-public-data-landsat",
+            5,
+        )
+        self.assertEqual(status, 404)
+        self.assertEqual(existence, "confirmed_exists")
+        self.assertEqual(list_status, 404)
+        self.assertEqual(mock_fetch_url.call_count, 3)
+        self.assertIn(
+            "gcp-public-data-landsat/__subrecon_probe__",
+            mock_fetch_url.call_args_list[2].args[0],
+        )
+
     @patch("builtins.print")
     @patch("subrecon.check_single_bucket_exists")
     def test_collect_s3_bucket_findings_suppresses_weak_likely_probe403(

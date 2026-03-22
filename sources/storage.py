@@ -691,6 +691,8 @@ def collect_s3_bucket_findings(
 def classify_gcp_status(status: int, error_code: str = "") -> str:
     if status == 200:
         return "confirmed_exists"
+    if status == 404 and error_code in {"NoSuchKey", "NoSuchObject"}:
+        return "confirmed_exists"
     if status == 404 and error_code == "NoSuchBucket":
         return "not_exists"
     if status in {301, 302, 307, 308, 401, 403}:
@@ -715,6 +717,22 @@ def probe_gcp_list_access(
     return status, parse_gcp_error_code(body)
 
 
+def probe_gcp_object_access(
+    bucket: str,
+    timeout: int,
+    *,
+    fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
+    parse_gcp_error_code: Callable[[str], str],
+    cloud_probe_http_retries: int,
+) -> tuple[int, str]:
+    probe_key = f"__subrecon_probe__{time_ns()}"
+    url = f"https://storage.googleapis.com/{bucket}/{probe_key}"
+    status, body, _ = fetch_url(
+        url, timeout=timeout, method="GET", retries=cloud_probe_http_retries
+    )
+    return status, parse_gcp_error_code(body)
+
+
 def check_single_gcp_bucket_exists(
     bucket: str,
     timeout: int,
@@ -722,6 +740,7 @@ def check_single_gcp_bucket_exists(
     fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
     classify_gcp_status: Callable[[int, str], str],
     probe_gcp_list_access: Callable[[str, int], tuple[int, str]],
+    probe_gcp_object_access: Callable[[str, int], tuple[int, str]],
     parse_gcp_error_code: Callable[[str], str],
     cloud_probe_http_retries: int,
 ) -> tuple[str, Optional[int], str, Optional[int]]:
@@ -737,6 +756,11 @@ def check_single_gcp_bucket_exists(
         list_existence = classify_gcp_status(list_status, list_error_code)
         if list_existence != "unknown":
             existence = list_existence
+    if existence == "unknown":
+        object_status, object_error_code = probe_gcp_object_access(bucket, timeout)
+        object_existence = classify_gcp_status(object_status, object_error_code)
+        if object_existence != "unknown":
+            existence = object_existence
 
     return bucket, status, existence, list_status
 

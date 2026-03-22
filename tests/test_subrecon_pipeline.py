@@ -628,6 +628,14 @@ class SubreconPipelineTest(unittest.TestCase):
         )
         self.assertEqual(
             subrecon.classify_azure_blob_status(404, "ContainerNotFound"),
+            "not_exists",
+        )
+        self.assertEqual(
+            subrecon.classify_azure_blob_status(401, "NoAuthenticationInformation"),
+            "likely_exists",
+        )
+        self.assertEqual(
+            subrecon.classify_azure_blob_status(403, "SomeUnknownCode"),
             "unknown",
         )
 
@@ -1087,6 +1095,65 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].asset, "acmestorage/example")
         self.assertEqual(health["status"], "ok")
+
+    @patch("subrecon.check_single_azure_blob_container")
+    @patch("subrecon.fetch_doh_cname_records")
+    def test_collect_azure_blob_findings_tracks_error_code_telemetry(
+        self, mock_fetch_doh, mock_check_azure
+    ) -> None:
+        mock_fetch_doh.return_value = (
+            200,
+            ["acmestorage.blob.core.windows.net"],
+            "https://dns.google/resolve?name=app.example.com&type=CNAME",
+        )
+
+        def fake_check(account: str, container: str, timeout: int):
+            if container == "$web":
+                return (
+                    account,
+                    container,
+                    401,
+                    "likely_exists",
+                    "NoAuthenticationInformation",
+                    "https://example",
+                )
+            if container == "$root":
+                return (
+                    account,
+                    container,
+                    404,
+                    "not_exists",
+                    "ContainerNotFound",
+                    "https://example",
+                )
+            return (
+                account,
+                container,
+                404,
+                "unknown",
+                "",
+                "https://example",
+            )
+
+        mock_check_azure.side_effect = fake_check
+        ctx = self._default_context()
+        ctx.domains = []
+        ctx.organization = ""
+        ctx.keywords = []
+        ctx.max_bucket_candidates = 3
+        health = subrecon.init_source_health("azure")
+        findings = subrecon.collect_azure_blob_findings(
+            ctx, {"app.example.com"}, health
+        )
+        self.assertEqual(findings, [])
+        self.assertEqual(health.get("likely_exists"), 1)
+        self.assertEqual(health.get("not_exists"), 1)
+        self.assertEqual(
+            health.get("error_code_counts", {}).get("NoAuthenticationInformation"), 1
+        )
+        self.assertEqual(
+            health.get("error_code_counts", {}).get("ContainerNotFound"), 1
+        )
 
     @patch("subrecon.fetch_doh_cname_records")
     def test_collect_azure_blob_findings_partial_when_doh_errors(

@@ -386,12 +386,20 @@ def classify_azure_blob_status(
     error_code: str,
     *,
     azure_blob_likely_exists_error_codes: set[str],
+    azure_blob_not_exists_error_codes: set[str],
 ) -> str:
+    normalized_error = error_code.strip()
     if status == 200:
         return "confirmed_public"
+    if normalized_error in azure_blob_not_exists_error_codes:
+        return "not_exists"
     if status in {401, 403}:
-        return "likely_exists"
-    if status == 409 and error_code in azure_blob_likely_exists_error_codes:
+        if not normalized_error:
+            return "likely_exists"
+        if normalized_error in azure_blob_likely_exists_error_codes:
+            return "likely_exists"
+        return "unknown"
+    if status == 409 and normalized_error in azure_blob_likely_exists_error_codes:
         return "likely_exists"
     return "unknown"
 
@@ -1178,8 +1186,10 @@ def collect_azure_blob_findings(
     stats["queried"] = stats["doh_queries"] + stats["probes"]
 
     likely_exists = 0
+    not_exists = 0
     system_container_hits = 0
     system_container_set = set(azure_blob_system_containers)
+    error_code_counts: dict[str, int] = {}
     with ThreadPoolExecutor(max_workers=context.threads) as pool:
         futures = {
             pool.submit(
@@ -1209,9 +1219,16 @@ def collect_azure_blob_findings(
                     detail=f"account={account} container={container}",
                 )
                 continue
+            if error_code:
+                error_code_counts[error_code] = (
+                    int(error_code_counts.get(error_code, 0)) + 1
+                )
 
             if existence == "likely_exists":
                 likely_exists += 1
+                continue
+            if existence == "not_exists":
+                not_exists += 1
                 continue
 
             if existence != "confirmed_public":
@@ -1260,6 +1277,8 @@ def collect_azure_blob_findings(
             )
 
     stats["likely_exists"] = likely_exists
+    stats["not_exists"] = not_exists
+    stats["error_code_counts"] = error_code_counts
     stats["system_container_hits"] = system_container_hits
     stats["hosts"] = len(findings)
     stats["findings"] = len(findings)

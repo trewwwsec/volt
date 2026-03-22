@@ -33,6 +33,7 @@ from constants import (
     AZURE_BLOB_CNAME_SUFFIXES,
     AZURE_BLOB_DNS_ZONE_CNAME_SUFFIXES,
     AZURE_BLOB_LIKELY_EXISTS_ERROR_CODES,
+    AZURE_BLOB_NOT_EXISTS_ERROR_CODES,
     AZURE_BLOB_REFERENCE_URL,
     AZURE_BLOB_SYSTEM_CONTAINERS,
     AZURE_BLOB_WEB_CNAME_SUFFIXES,
@@ -486,6 +487,7 @@ def classify_azure_blob_status(status: int, error_code: str) -> str:
         status,
         error_code,
         azure_blob_likely_exists_error_codes=AZURE_BLOB_LIKELY_EXISTS_ERROR_CODES,
+        azure_blob_not_exists_error_codes=AZURE_BLOB_NOT_EXISTS_ERROR_CODES,
     )
 
 

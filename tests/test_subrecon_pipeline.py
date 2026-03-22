@@ -565,6 +565,34 @@ class SubreconPipelineTest(unittest.TestCase):
             "unknown",
         )
 
+    def test_parse_azure_error_code_prefers_header(self) -> None:
+        code = subrecon.parse_azure_error_code(
+            {"x-ms-error-code": "AuthorizationFailure"},
+            "<Error><Code>FeatureVersionMismatch</Code></Error>",
+        )
+        self.assertEqual(code, "AuthorizationFailure")
+
+    def test_parse_azure_error_code_falls_back_to_body(self) -> None:
+        code = subrecon.parse_azure_error_code(
+            {},
+            "<Error><Code>FeatureVersionMismatch</Code></Error>",
+        )
+        self.assertEqual(code, "FeatureVersionMismatch")
+
+    def test_parse_s3_error_code_prefers_header(self) -> None:
+        code = subrecon.parse_s3_error_code(
+            {"x-amz-error-code": "NoSuchBucket"},
+            "<Error><Code>AccessDenied</Code></Error>",
+        )
+        self.assertEqual(code, "NoSuchBucket")
+
+    def test_parse_s3_error_code_falls_back_to_body(self) -> None:
+        code = subrecon.parse_s3_error_code(
+            {},
+            "<Error><Code>NoSuchKey</Code></Error>",
+        )
+        self.assertEqual(code, "NoSuchKey")
+
     @patch("builtins.print")
     @patch("subrecon.check_single_bucket_exists")
     def test_collect_s3_bucket_findings_skips_unknown_signals(

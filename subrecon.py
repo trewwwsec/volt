@@ -31,8 +31,10 @@ from constants import (
     AMASS_SRC_UNSUPPORTED_ERROR,
     AZURE_BLOB_API_VERSION,
     AZURE_BLOB_CNAME_SUFFIXES,
+    AZURE_BLOB_DNS_ZONE_CNAME_SUFFIXES,
     AZURE_BLOB_LIKELY_EXISTS_ERROR_CODES,
     AZURE_BLOB_REFERENCE_URL,
+    AZURE_BLOB_WEB_CNAME_SUFFIXES,
     CT_HTTP_RETRIES,
     CLOUD_PROBE_HTTP_RETRIES,
     DEFAULT_HTTP_RETRIES,
@@ -461,6 +463,8 @@ def extract_azure_storage_account_from_cname(cname: str) -> str:
         cname,
         normalize_domain=normalize_domain,
         azure_blob_cname_suffixes=AZURE_BLOB_CNAME_SUFFIXES,
+        azure_blob_web_cname_suffixes=AZURE_BLOB_WEB_CNAME_SUFFIXES,
+        azure_blob_dns_zone_cname_suffixes=AZURE_BLOB_DNS_ZONE_CNAME_SUFFIXES,
     )
 
 

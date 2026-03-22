@@ -663,6 +663,28 @@ class SubreconPipelineTest(unittest.TestCase):
         code = subrecon.parse_gcp_error_code("<Error><Code>NoSuchBucket</Code></Error>")
         self.assertEqual(code, "NoSuchBucket")
 
+    def test_extract_azure_storage_account_from_cname_supports_extended_suffixes(
+        self,
+    ) -> None:
+        self.assertEqual(
+            subrecon.extract_azure_storage_account_from_cname(
+                "acmestorage.blob.core.usgovcloudapi.net"
+            ),
+            "acmestorage",
+        )
+        self.assertEqual(
+            subrecon.extract_azure_storage_account_from_cname(
+                "acmestorage.z05.blob.storage.azure.net"
+            ),
+            "acmestorage",
+        )
+        self.assertEqual(
+            subrecon.extract_azure_storage_account_from_cname(
+                "asverify.acmestorage.web.core.windows.net"
+            ),
+            "acmestorage",
+        )
+
     def test_validate_s3_bucket_name_filters_reserved_and_invalid(self) -> None:
         self.assertEqual(subrecon.validate_s3_bucket_name("valid-bucket"), (True, ""))
         self.assertEqual(
@@ -973,6 +995,50 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(findings[0].asset, "acmestorage/example")
         self.assertEqual(health["status"], "ok")
         self.assertEqual(health["findings"], 1)
+
+    @patch("subrecon.check_single_azure_blob_container")
+    @patch("subrecon.fetch_doh_cname_records")
+    def test_collect_azure_blob_findings_infers_account_from_host_without_cname(
+        self, mock_fetch_doh, mock_check_azure
+    ) -> None:
+        mock_fetch_doh.return_value = (
+            200,
+            [],
+            "https://dns.google/resolve?name=acmestorage.blob.core.windows.net&type=CNAME",
+        )
+
+        def fake_check(account: str, container: str, timeout: int):
+            if account == "acmestorage" and container == "example":
+                return (
+                    account,
+                    container,
+                    200,
+                    "confirmed_public",
+                    "",
+                    "https://example",
+                )
+            return (
+                account,
+                container,
+                404,
+                "unknown",
+                "ContainerNotFound",
+                "https://example",
+            )
+
+        mock_check_azure.side_effect = fake_check
+        ctx = self._default_context()
+        ctx.domains = []
+        ctx.organization = ""
+        ctx.keywords = ["example"]
+        ctx.max_bucket_candidates = 200
+        health = subrecon.init_source_health("azure")
+        findings = subrecon.collect_azure_blob_findings(
+            ctx, {"acmestorage.blob.core.windows.net"}, health
+        )
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].asset, "acmestorage/example")
+        self.assertEqual(health["status"], "ok")
 
     @patch("subrecon.fetch_doh_cname_records")
     def test_collect_azure_blob_findings_partial_when_doh_errors(

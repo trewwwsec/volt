@@ -60,7 +60,20 @@ TAKEOVER_SIGNATURES: list[dict[str, Any]] = [
 AZURE_BLOB_CNAME_SUFFIXES = (
     "blob.core.windows.net",
     "privatelink.blob.core.windows.net",
+    "blob.core.usgovcloudapi.net",
+    "privatelink.blob.core.usgovcloudapi.net",
+    "blob.core.chinacloudapi.cn",
+    "privatelink.blob.core.chinacloudapi.cn",
+    "blob.core.cloudapi.de",
+    "privatelink.blob.core.cloudapi.de",
 )
+AZURE_BLOB_WEB_CNAME_SUFFIXES = (
+    "web.core.windows.net",
+    "web.core.usgovcloudapi.net",
+    "web.core.chinacloudapi.cn",
+    "web.core.cloudapi.de",
+)
+AZURE_BLOB_DNS_ZONE_CNAME_SUFFIXES = ("blob.storage.azure.net",)
 AZURE_BLOB_LIKELY_EXISTS_ERROR_CODES = {
     "AuthorizationFailure",
     "AuthenticationFailed",

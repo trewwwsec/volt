@@ -132,16 +132,46 @@ def extract_azure_storage_account_from_cname(
     *,
     normalize_domain: Callable[[str], str],
     azure_blob_cname_suffixes: tuple[str, ...],
+    azure_blob_web_cname_suffixes: tuple[str, ...],
+    azure_blob_dns_zone_cname_suffixes: tuple[str, ...],
 ) -> str:
     candidate = normalize_domain(cname.rstrip("."))
     if not candidate:
         return ""
 
+    def extract_account_with_suffix(value: str, suffix: str) -> str:
+        if value == suffix or not value.endswith(f".{suffix}"):
+            return ""
+        prefix = value[: -(len(suffix) + 1)]
+        if prefix.startswith("asverify."):
+            prefix = prefix[len("asverify.") :]
+        account = prefix.split(".", 1)[0]
+        if re.fullmatch(r"[a-z0-9]{3,24}", account):
+            return account
+        return ""
+
     for suffix in azure_blob_cname_suffixes:
+        account = extract_account_with_suffix(candidate, suffix)
+        if account:
+            return account
+
+    for suffix in azure_blob_web_cname_suffixes:
+        account = extract_account_with_suffix(candidate, suffix)
+        if account:
+            return account
+
+    for suffix in azure_blob_dns_zone_cname_suffixes:
         if candidate == suffix or not candidate.endswith(f".{suffix}"):
             continue
         prefix = candidate[: -(len(suffix) + 1)]
-        account = prefix.split(".", 1)[0]
+        if prefix.startswith("asverify."):
+            prefix = prefix[len("asverify.") :]
+        labels = [label for label in prefix.split(".") if label]
+        if not labels:
+            continue
+        account = labels[0]
+        if len(labels) >= 2 and not re.fullmatch(r"z[0-9]{1,2}", labels[1]):
+            continue
         if re.fullmatch(r"[a-z0-9]{3,24}", account):
             return account
     return ""
@@ -1063,6 +1093,9 @@ def collect_azure_blob_findings(
     def resolve_account_candidates(host: str) -> tuple[str, int, list[str], str]:
         doh_status, cnames, doh_url = fetch_doh_cname_records(host, context.timeout)
         accounts: set[str] = set()
+        host_account = extract_azure_storage_account_from_cname(host)
+        if host_account:
+            accounts.add(host_account)
         for cname in cnames:
             account = extract_azure_storage_account_from_cname(cname)
             if account:

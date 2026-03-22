@@ -613,6 +613,9 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(subrecon.classify_gcp_status(200), "confirmed_exists")
         self.assertEqual(subrecon.classify_gcp_status(403), "likely_exists")
         self.assertEqual(subrecon.classify_gcp_status(404), "unknown")
+        self.assertEqual(
+            subrecon.classify_gcp_status(404, "NoSuchBucket"), "not_exists"
+        )
 
     def test_classify_azure_blob_status(self) -> None:
         self.assertEqual(
@@ -655,6 +658,10 @@ class SubreconPipelineTest(unittest.TestCase):
             "<Error><Code>NoSuchKey</Code></Error>",
         )
         self.assertEqual(code, "NoSuchKey")
+
+    def test_parse_gcp_error_code_falls_back_to_body(self) -> None:
+        code = subrecon.parse_gcp_error_code("<Error><Code>NoSuchBucket</Code></Error>")
+        self.assertEqual(code, "NoSuchBucket")
 
     def test_validate_s3_bucket_name_filters_reserved_and_invalid(self) -> None:
         self.assertEqual(subrecon.validate_s3_bucket_name("valid-bucket"), (True, ""))
@@ -761,6 +768,23 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertGreater(
             health.get("filtered_reasons", {}).get("reserved_prefix", 0), 0
         )
+
+    @patch("subrecon.fetch_url")
+    def test_check_single_gcp_bucket_exists_uses_nosuchbucket_signal(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.side_effect = [
+            (404, "", {}),
+            (404, "<Error><Code>NoSuchBucket</Code></Error>", {}),
+        ]
+        _, status, existence, list_status = subrecon.check_single_gcp_bucket_exists(
+            "definitely-not-real-gcs-bucket-xyz987",
+            5,
+        )
+        self.assertEqual(status, 404)
+        self.assertEqual(existence, "not_exists")
+        self.assertEqual(list_status, 404)
+        self.assertEqual(mock_fetch_url.call_count, 2)
 
     @patch("builtins.print")
     @patch("subrecon.check_single_bucket_exists")

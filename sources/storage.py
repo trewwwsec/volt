@@ -335,6 +335,13 @@ def parse_s3_error_code(headers: dict[str, str], body: str) -> str:
     return ""
 
 
+def parse_gcp_error_code(body: str) -> str:
+    match = re.search(r"<Code>\s*([A-Za-z0-9]+)\s*</Code>", body)
+    if match:
+        return match.group(1).strip()
+    return ""
+
+
 def classify_azure_blob_status(
     status: int,
     error_code: str,
@@ -681,9 +688,11 @@ def collect_s3_bucket_findings(
     return findings
 
 
-def classify_gcp_status(status: int) -> str:
+def classify_gcp_status(status: int, error_code: str = "") -> str:
     if status == 200:
         return "confirmed_exists"
+    if status == 404 and error_code == "NoSuchBucket":
+        return "not_exists"
     if status in {301, 302, 307, 308, 401, 403}:
         return "likely_exists"
     if status in {400, 404}:
@@ -696,13 +705,14 @@ def probe_gcp_list_access(
     timeout: int,
     *,
     fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
+    parse_gcp_error_code: Callable[[str], str],
     cloud_probe_http_retries: int,
-) -> int:
+) -> tuple[int, str]:
     url = f"https://storage.googleapis.com/{bucket}/"
-    status, _, _ = fetch_url(
+    status, body, _ = fetch_url(
         url, timeout=timeout, method="GET", retries=cloud_probe_http_retries
     )
-    return status
+    return status, parse_gcp_error_code(body)
 
 
 def check_single_gcp_bucket_exists(
@@ -710,21 +720,23 @@ def check_single_gcp_bucket_exists(
     timeout: int,
     *,
     fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
-    classify_gcp_status: Callable[[int], str],
-    probe_gcp_list_access: Callable[[str, int], int],
+    classify_gcp_status: Callable[[int, str], str],
+    probe_gcp_list_access: Callable[[str, int], tuple[int, str]],
+    parse_gcp_error_code: Callable[[str], str],
     cloud_probe_http_retries: int,
 ) -> tuple[str, Optional[int], str, Optional[int]]:
     url = f"https://storage.googleapis.com/{bucket}/"
-    status, _, _ = fetch_url(
+    status, body, _ = fetch_url(
         url, timeout=timeout, method="HEAD", retries=cloud_probe_http_retries
     )
-    existence = classify_gcp_status(status)
+    existence = classify_gcp_status(status, parse_gcp_error_code(body))
     list_status: Optional[int] = None
 
     if existence == "unknown":
-        list_status = probe_gcp_list_access(bucket, timeout)
-        if classify_gcp_status(list_status) != "unknown":
-            existence = classify_gcp_status(list_status)
+        list_status, list_error_code = probe_gcp_list_access(bucket, timeout)
+        list_existence = classify_gcp_status(list_status, list_error_code)
+        if list_existence != "unknown":
+            existence = list_existence
 
     return bucket, status, existence, list_status
 

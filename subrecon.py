@@ -80,6 +80,7 @@ from sources.storage import (
     extract_bucket_candidates_from_hosts as extract_bucket_candidates_from_hosts_source,
     is_valid_azure_container_name as is_valid_azure_container_name_source,
     parse_azure_error_code as parse_azure_error_code_source,
+    parse_gcp_error_code as parse_gcp_error_code_source,
     parse_s3_error_code as parse_s3_error_code_source,
     probe_gcp_list_access as probe_gcp_list_access_source,
     probe_s3_object_access as probe_s3_object_access_source,
@@ -470,6 +471,10 @@ def parse_s3_error_code(headers: dict[str, str], body: str) -> str:
     return parse_s3_error_code_source(headers, body)
 
 
+def parse_gcp_error_code(body: str) -> str:
+    return parse_gcp_error_code_source(body)
+
+
 def classify_azure_blob_status(status: int, error_code: str) -> str:
     return classify_azure_blob_status_source(
         status,
@@ -589,15 +594,16 @@ def collect_s3_bucket_findings(
     )
 
 
-def classify_gcp_status(status: int) -> str:
-    return classify_gcp_status_source(status)
+def classify_gcp_status(status: int, error_code: str = "") -> str:
+    return classify_gcp_status_source(status, error_code)
 
 
-def probe_gcp_list_access(bucket: str, timeout: int) -> int:
+def probe_gcp_list_access(bucket: str, timeout: int) -> tuple[int, str]:
     return probe_gcp_list_access_source(
         bucket,
         timeout,
         fetch_url=fetch_url,
+        parse_gcp_error_code=parse_gcp_error_code,
         cloud_probe_http_retries=CLOUD_PROBE_HTTP_RETRIES,
     )
 
@@ -611,6 +617,7 @@ def check_single_gcp_bucket_exists(
         fetch_url=fetch_url,
         classify_gcp_status=classify_gcp_status,
         probe_gcp_list_access=probe_gcp_list_access,
+        parse_gcp_error_code=parse_gcp_error_code,
         cloud_probe_http_retries=CLOUD_PROBE_HTTP_RETRIES,
     )
 

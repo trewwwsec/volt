@@ -16,7 +16,10 @@ It is designed for legal-safe OSINT workflows: no port scanning, no exploitation
   - SQL dumps
   - backup/archive artifacts
   - `.git/config`
-- Generates likely S3 bucket names from organization/domain signals and checks bucket endpoints with `HEAD` plus automatic list-probe fallback (`ListObjectsV2` with `max-keys=0`) for ambiguous responses
+- Generates likely cloud storage names from organization/domain signals and checks:
+  - AWS S3 bucket endpoints with `HEAD` plus automatic list-probe fallback (`ListObjectsV2` with `max-keys=0`) for ambiguous responses
+  - Google Cloud Storage (GCS) bucket endpoints with `HEAD` plus list probe fallback
+  - Azure Blob containers inferred from discovered-host CNAMEs (`*.blob.core.windows.net`) with anonymous list probes
 - Checks discovered subdomains for takeover signals using CNAME provider matching plus landing-page fingerprint validation
 - Produces a product-style JSON report with:
   - finding severity
@@ -30,6 +33,8 @@ It is designed for legal-safe OSINT workflows: no port scanning, no exploitation
 - No exploit attempts
 - No login attempts
 - No S3 object download
+- No Google Cloud Storage (GCS) object download
+- No Azure Blob object download
 - No deep content crawling
 
 ## Requirements
@@ -45,9 +50,14 @@ It is designed for legal-safe OSINT workflows: no port scanning, no exploitation
   - `uv run python subrecon.py -d example.com -o perimeter_report.json`
 - Run tests:
   - `uv run python -m unittest discover -s tests -p "test_*.py"`
+- Run lint:
+  - `uvx ruff check .`
+- Check formatting:
+  - `uvx ruff format --check .`
 
 Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md)
 Testing: [docs/TESTING.md](docs/TESTING.md)
+CI: `.github/workflows/ci.yml` (`push`/`pull_request`)
 
 ## Usage
 
@@ -60,19 +70,19 @@ uv run python subrecon.py -d example.com -o perimeter_report.json
 ### S3-focused check (high signal)
 
 ```bash
-uv run python subrecon.py -d example.com --keywords noaa-goes19 --no-ct --no-search --no-subfinder --no-amass -o s3_report.json
+uv run python subrecon.py -d example.com --keywords noaa-goes19 --no-ct --no-search --no-subfinder --no-amass --no-gcp --no-azure -o s3_report.json
 ```
 
 ### Takeover-focused check
 
 ```bash
-uv run python subrecon.py -d example.com --no-search --no-s3 -o takeover_report.json
+uv run python subrecon.py -d example.com --no-search --no-s3 --no-gcp --no-azure -o takeover_report.json
 ```
 
 ### Search-only check using Common Crawl
 
 ```bash
-uv run python subrecon.py -d example.com --search-providers commoncrawl --no-ct --no-subfinder --no-amass --no-s3 -o search_report.json
+uv run python subrecon.py -d example.com --search-providers commoncrawl --no-ct --no-subfinder --no-amass --no-s3 --no-gcp --no-azure -o search_report.json
 ```
 
 ### Single domain
@@ -109,10 +119,10 @@ uv run python subrecon.py -d example.com --no-search --no-s3
 --keywords             Comma-separated org/brand keywords
 --search-providers     Comma-separated search providers (default: bing,commoncrawl)
 --timeout              HTTP timeout seconds (default: 10)
---tool-timeout         Timeout for subfinder/amass runs (default: 300)
+--tool-timeout         Timeout for subfinder/amass runs (default: 120)
 -t, --threads          Concurrent worker threads (default: 20)
 -v, --verbose          Verbose mode
---max-bucket-candidates Max S3 names to check (default: 800)
+--max-bucket-candidates Max cloud storage names to check per module (default: 300)
 --s3-list-probe        Enable anonymous ListObjectsV2 fallback probes (default: enabled)
 --no-s3-list-probe     Disable anonymous ListObjectsV2 fallback probes
 --no-ct                Disable CT log collection
@@ -120,6 +130,8 @@ uv run python subrecon.py -d example.com --no-search --no-s3
 --no-amass             Disable passive subdomain collection via amass
 --no-search            Disable search-index dorking
 --no-s3                Disable S3 bucket checks
+--no-gcp               Disable GCP bucket checks
+--no-azure             Disable Azure Blob container checks
 --no-takeover          Disable passive subdomain takeover fingerprint checks
 ```
 
@@ -157,7 +169,7 @@ Common status values:
 
 A finding includes:
 
-- `asset_type` (`subdomain`, `indexed_leak`, `s3_bucket`, `subdomain_takeover`)
+- `asset_type` (`subdomain`, `indexed_leak`, `s3_bucket`, `gcp_bucket`, `azure_blob_container`, `subdomain_takeover`)
 - `asset`
 - `severity`
 - `confidence`
@@ -176,9 +188,12 @@ A finding includes:
 ## Troubleshooting
 
 - If `subfinder`/`amass` return `0` hosts, increase `--tool-timeout` (for example `--tool-timeout 600`).
-- If `amass` fails with `flag provided but not defined: -src`, your installed amass version is incompatible with structured-source mode; upgrade amass or run with `--no-amass`.
+- If `amass` reports `flag provided but not defined: -src` or `-json`, subrecon now retries in compatibility mode (without `-src`, then plain passive output parsing as needed); source-level provenance confidence may be reduced until amass is upgraded.
 - Passive-source tools depend on network reachability and source/provider availability.
+- HTTP retry behavior is conservative and source-specific (CT/search retry, takeover lighter retry, cloud probe checks remain no-retry by default).
 - If S3 checks return `0` with an "ambiguous responses" note, AWS `HeadBucket` responses were inconclusive (generic `400/403/404` without enough signal). The tool automatically attempts an anonymous `ListObjectsV2` fallback probe (`max-keys=0`).
 - Use `--no-s3-list-probe` only if you need strict HEAD-only behavior.
 - If search findings are unexpectedly empty, run with `--search-providers commoncrawl` and check `source_health.search` in the report.
+- GCP bucket findings are heuristic (`200` strong signal, `403` likely-exists signal); treat low-severity bucket existence as triage leads.
+- Azure Blob findings currently report high-signal anonymous listability only (`HTTP 200` on list probes); `source_health.azure` still tracks inferred accounts/probe counts when no findings are returned.
 - Takeover findings are signal-based; treat edge-case fingerprints as triage leads and verify ownership/claimability in an authorized workflow.

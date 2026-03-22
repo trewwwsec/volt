@@ -4,6 +4,7 @@ import argparse
 import json
 from dataclasses import asdict
 from datetime import datetime, timezone
+from random import uniform
 from time import sleep
 from typing import Any, Optional
 from urllib import error, parse, request
@@ -82,8 +83,10 @@ from sources.storage import (
     probe_gcp_list_access as probe_gcp_list_access_source,
     probe_s3_object_access as probe_s3_object_access_source,
     probe_s3_list_access as probe_s3_list_access_source,
+    probe_s3_website_access as probe_s3_website_access_source,
     sanitize_azure_container_label as sanitize_azure_container_label_source,
     sanitize_bucket_label as sanitize_bucket_label_source,
+    validate_s3_bucket_name as validate_s3_bucket_name_source,
 )
 from sources.takeover import (
     collect_subdomain_takeover_findings as collect_subdomain_takeover_findings_source,
@@ -251,6 +254,7 @@ def fetch_url(
         request_module=request,
         error_module=error,
         sleep_fn=sleep,
+        random_uniform_fn=uniform,
     )
 
 
@@ -429,6 +433,10 @@ def sanitize_azure_container_label(value: str) -> str:
     return sanitize_azure_container_label_source(value)
 
 
+def validate_s3_bucket_name(value: str) -> tuple[bool, str]:
+    return validate_s3_bucket_name_source(value)
+
+
 def is_valid_azure_container_name(value: str) -> bool:
     return is_valid_azure_container_name_source(value)
 
@@ -488,10 +496,13 @@ def classify_s3_head_status(status: int, region: str) -> str:
     return classify_s3_head_status_source(status, region)
 
 
-def probe_s3_list_access(bucket: str, timeout: int) -> tuple[int, dict[str, str], str]:
+def probe_s3_list_access(
+    bucket: str, timeout: int, region: str = ""
+) -> tuple[int, dict[str, str], str]:
     return probe_s3_list_access_source(
         bucket,
         timeout,
+        region,
         fetch_url=fetch_url,
         parse_s3_error_code=parse_s3_error_code,
         cloud_probe_http_retries=CLOUD_PROBE_HTTP_RETRIES,
@@ -499,10 +510,24 @@ def probe_s3_list_access(bucket: str, timeout: int) -> tuple[int, dict[str, str]
 
 
 def probe_s3_object_access(
-    bucket: str, timeout: int
+    bucket: str, timeout: int, region: str = ""
 ) -> tuple[int, dict[str, str], str]:
     return probe_s3_object_access_source(
         bucket,
+        timeout,
+        region,
+        fetch_url=fetch_url,
+        parse_s3_error_code=parse_s3_error_code,
+        cloud_probe_http_retries=CLOUD_PROBE_HTTP_RETRIES,
+    )
+
+
+def probe_s3_website_access(
+    bucket: str, region: str, timeout: int
+) -> tuple[int, dict[str, str], str]:
+    return probe_s3_website_access_source(
+        bucket,
+        region,
         timeout,
         fetch_url=fetch_url,
         parse_s3_error_code=parse_s3_error_code,
@@ -511,16 +536,23 @@ def probe_s3_object_access(
 
 
 def check_single_bucket_exists(
-    bucket: str, timeout: int, s3_list_probe: bool = True
+    bucket: str,
+    timeout: int,
+    s3_list_probe: bool = True,
+    s3_website_probe: bool = False,
+    s3_probe_retries: int = 0,
 ) -> tuple[str, Optional[int], str, str, Optional[int]]:
     return check_single_bucket_exists_source(
         bucket,
         timeout,
         s3_list_probe=s3_list_probe,
+        s3_website_probe=s3_website_probe,
+        s3_probe_retries=s3_probe_retries,
         fetch_url=fetch_url,
         classify_s3_head_status=classify_s3_head_status,
         probe_s3_list_access=probe_s3_list_access,
         probe_s3_object_access=probe_s3_object_access,
+        probe_s3_website_access=probe_s3_website_access,
         cloud_probe_http_retries=CLOUD_PROBE_HTTP_RETRIES,
     )
 
@@ -535,6 +567,7 @@ def collect_s3_bucket_findings(
         stats,
         build_bucket_wordlist=build_bucket_wordlist,
         check_single_bucket_exists=check_single_bucket_exists,
+        validate_s3_bucket_name=validate_s3_bucket_name,
         log=log,
     )
 

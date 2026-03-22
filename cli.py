@@ -137,6 +137,24 @@ def build_parser(*, positive_int: Callable[[str], int]) -> argparse.ArgumentPars
         help="Disable anonymous ListObjectsV2 fallback probes for ambiguous S3 responses",
     )
     parser.set_defaults(s3_list_probe=True)
+    parser.add_argument(
+        "--s3-website-probe",
+        action="store_true",
+        help=(
+            "Enable optional S3 website-endpoint probes "
+            "(s3-website-<region>) for additional existence signals"
+        ),
+    )
+    parser.add_argument(
+        "--s3-probe-retries",
+        type=int,
+        choices=[0, 1],
+        default=0,
+        help=(
+            "S3 probe retry budget for transient failures "
+            "(0=default conservative, 1=single retry with backoff)"
+        ),
+    )
 
     parser.add_argument(
         "--no-ct", action="store_true", help="Disable CT log collection"
@@ -217,6 +235,8 @@ def run_scan(
         max_bucket_candidates=args.max_bucket_candidates,
         verbose=args.verbose,
         s3_list_probe=args.s3_list_probe,
+        s3_website_probe=getattr(args, "s3_website_probe", False),
+        s3_probe_retries=getattr(args, "s3_probe_retries", 0),
     )
 
     print(f"[*] Passive scan started for {len(domains)} domain(s)")
@@ -278,11 +298,24 @@ def run_scan(
 
     if not args.no_s3:
         if args.s3_list_probe:
-            print(
-                "[*] Checking candidate S3 bucket names (HEAD + optional list probe)..."
-            )
+            if getattr(args, "s3_website_probe", False):
+                print(
+                    "[*] Checking candidate S3 bucket names "
+                    "(HEAD + optional list probe + website probe)..."
+                )
+            else:
+                print(
+                    "[*] Checking candidate S3 bucket names "
+                    "(HEAD + optional list probe)..."
+                )
         else:
-            print("[*] Checking candidate S3 bucket names (HEAD only)...")
+            if getattr(args, "s3_website_probe", False):
+                print(
+                    "[*] Checking candidate S3 bucket names "
+                    "(HEAD only + optional website probe)..."
+                )
+            else:
+                print("[*] Checking candidate S3 bucket names (HEAD only)...")
         s3_findings = collect_s3_bucket_findings(
             context, discovered_hosts, source_health["s3"]
         )
@@ -333,6 +366,11 @@ def run_scan(
     else:
         legal_notes.append(
             "S3 checks use bucket endpoint HEAD requests only (no object retrieval)."
+        )
+    if getattr(args, "s3_website_probe", False):
+        legal_notes.append(
+            "S3 website probing uses anonymous HTTP requests against "
+            "region-scoped website endpoints (no object retrieval)."
         )
 
     return {

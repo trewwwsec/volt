@@ -33,3 +33,5 @@ class ScanContext:
     max_bucket_candidates: int
     verbose: bool
     s3_list_probe: bool = True
+    s3_website_probe: bool = False
+    s3_probe_retries: int = 0

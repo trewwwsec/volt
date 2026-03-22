@@ -572,7 +572,13 @@ class SubreconPipelineTest(unittest.TestCase):
     def test_collect_s3_bucket_findings_classifies_200_as_medium(
         self, mock_bucket_check
     ) -> None:
-        def fake_check(bucket: str, timeout: int, s3_list_probe: bool = False):
+        def fake_check(
+            bucket: str,
+            timeout: int,
+            s3_list_probe: bool = False,
+            s3_website_probe: bool = False,
+            s3_probe_retries: int = 0,
+        ):
             if bucket == "mybucket":
                 return bucket, 200, "confirmed_exists", "us-east-1", None
             if bucket == "example":
@@ -650,6 +656,21 @@ class SubreconPipelineTest(unittest.TestCase):
         )
         self.assertEqual(code, "NoSuchKey")
 
+    def test_validate_s3_bucket_name_filters_reserved_and_invalid(self) -> None:
+        self.assertEqual(subrecon.validate_s3_bucket_name("valid-bucket"), (True, ""))
+        self.assertEqual(
+            subrecon.validate_s3_bucket_name("xn--bucket"),
+            (False, "reserved_prefix"),
+        )
+        self.assertEqual(
+            subrecon.validate_s3_bucket_name("example-s3alias"),
+            (False, "reserved_suffix"),
+        )
+        self.assertEqual(
+            subrecon.validate_s3_bucket_name("192.168.0.1"),
+            (False, "ip_address_style"),
+        )
+
     @patch("builtins.print")
     @patch("subrecon.check_single_bucket_exists")
     def test_collect_s3_bucket_findings_skips_unknown_signals(
@@ -659,6 +680,16 @@ class SubreconPipelineTest(unittest.TestCase):
         ctx = self._default_context()
         findings = subrecon.collect_s3_bucket_findings(ctx, hosts={"a.example.com"})
         self.assertEqual(findings, [])
+
+    def test_collect_s3_bucket_findings_filters_invalid_candidates(self) -> None:
+        ctx = self._default_context()
+        ctx.keywords = ["192.168.0.1"]
+        health = subrecon.init_source_health("s3")
+        subrecon.collect_s3_bucket_findings(ctx, hosts=set(), health=health)
+        self.assertGreater(health.get("filtered_invalid_candidates", 0), 0)
+        self.assertGreater(
+            health.get("filtered_reasons", {}).get("ip_address_style", 0), 0
+        )
 
     @patch("subrecon.check_single_gcp_bucket_exists")
     def test_collect_gcp_bucket_findings_classifies_200_as_medium(
@@ -807,7 +838,7 @@ class SubreconPipelineTest(unittest.TestCase):
         self, mock_fetch_url
     ) -> None:
         mock_fetch_url.side_effect = [
-            (404, "", {"server": "AmazonS3"}),
+            (404, "", {"server": "AmazonS3", "x-amz-bucket-region": "us-east-1"}),
             (403, "", {"x-amz-bucket-region": "us-east-1"}),
         ]
         _, _, existence, region, list_status = subrecon.check_single_bucket_exists(
@@ -817,13 +848,17 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(existence, "likely_exists")
         self.assertEqual(region, "us-east-1")
         self.assertEqual(list_status, 403)
+        self.assertIn(
+            "example-bucket.s3.us-east-1.amazonaws.com",
+            mock_fetch_url.call_args_list[1].args[0],
+        )
 
     @patch("subrecon.fetch_url")
     def test_check_single_bucket_exists_uses_object_probe_for_nosuchkey_signal(
         self, mock_fetch_url
     ) -> None:
         mock_fetch_url.side_effect = [
-            (404, "", {"server": "AmazonS3"}),
+            (404, "", {"server": "AmazonS3", "x-amz-bucket-region": "us-east-1"}),
             (404, "<Error><Code>NoSuchBucket</Code></Error>", {"server": "AmazonS3"}),
             (404, "<Error><Code>NoSuchKey</Code></Error>", {"server": "AmazonS3"}),
         ]
@@ -835,6 +870,48 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(list_status, 404)
         self.assertEqual(existence, "confirmed_exists")
         self.assertEqual(mock_fetch_url.call_count, 3)
+        self.assertIn(
+            "noaa-goes16.s3.us-east-1.amazonaws.com",
+            mock_fetch_url.call_args_list[2].args[0],
+        )
+
+    @patch("subrecon.fetch_url")
+    def test_check_single_bucket_exists_uses_website_probe_when_enabled(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.side_effect = [
+            (404, "", {"server": "AmazonS3", "x-amz-bucket-region": "us-east-1"}),
+            (404, "<Error><Code>AccessDenied</Code></Error>", {"server": "AmazonS3"}),
+            (404, "<Error><Code>AccessDenied</Code></Error>", {"server": "AmazonS3"}),
+            (403, "", {}),
+        ]
+        _, _, existence, region, _ = subrecon.check_single_bucket_exists(
+            "example-website-bucket",
+            5,
+            s3_website_probe=True,
+        )
+        self.assertEqual(existence, "likely_exists")
+        self.assertEqual(region, "us-east-1")
+        self.assertIn(
+            "example-website-bucket.s3-website-us-east-1.amazonaws.com",
+            mock_fetch_url.call_args_list[3].args[0],
+        )
+
+    @patch("subrecon.fetch_url")
+    def test_check_single_bucket_exists_respects_s3_probe_retry_override(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.side_effect = [
+            (404, "", {"server": "AmazonS3"}),
+            (404, "<Error><Code>NoSuchBucket</Code></Error>", {"server": "AmazonS3"}),
+            (404, "<Error><Code>NoSuchBucket</Code></Error>", {"server": "AmazonS3"}),
+        ]
+        subrecon.check_single_bucket_exists(
+            "retry-test-bucket",
+            5,
+            s3_probe_retries=1,
+        )
+        self.assertEqual(mock_fetch_url.call_args_list[0].kwargs.get("retries"), 1)
 
     @patch("subrecon.fetch_url")
     def test_check_single_bucket_exists_uses_object_probe_for_nosuchbucket_signal(
@@ -1098,6 +1175,17 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertTrue(args.s3_list_probe)
         args = parser.parse_args(["-d", "example.com", "--no-s3-list-probe"])
         self.assertFalse(args.s3_list_probe)
+
+    def test_build_parser_s3_website_probe_and_retry_defaults(self) -> None:
+        parser = subrecon.build_parser()
+        args = parser.parse_args(["-d", "example.com"])
+        self.assertFalse(args.s3_website_probe)
+        self.assertEqual(args.s3_probe_retries, 0)
+        args = parser.parse_args(
+            ["-d", "example.com", "--s3-website-probe", "--s3-probe-retries", "1"]
+        )
+        self.assertTrue(args.s3_website_probe)
+        self.assertEqual(args.s3_probe_retries, 1)
 
     def test_build_parser_takeover_default_and_disable_flag(self) -> None:
         parser = subrecon.build_parser()

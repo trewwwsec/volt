@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from ipaddress import ip_address
 import re
 from time import time_ns
 from typing import Any, Callable, Optional
@@ -15,6 +16,35 @@ def sanitize_bucket_label(value: str) -> str:
     cleaned = re.sub(r"\.{2,}", ".", cleaned)
     cleaned = re.sub(r"-{2,}", "-", cleaned)
     return cleaned
+
+
+def validate_s3_bucket_name(value: str) -> tuple[bool, str]:
+    candidate = value.strip().lower()
+    if not (3 <= len(candidate) <= 63):
+        return False, "length"
+    if not re.fullmatch(r"[a-z0-9][a-z0-9.-]*[a-z0-9]", candidate):
+        return False, "charset_or_boundary"
+    if ".." in candidate:
+        return False, "adjacent_periods"
+    try:
+        ip_address(candidate)
+        return False, "ip_address_style"
+    except ValueError:
+        pass
+
+    reserved_prefixes = ("xn--", "sthree-", "amzn-s3-demo-")
+    if candidate.startswith(reserved_prefixes):
+        return False, "reserved_prefix"
+
+    reserved_suffixes = ("-s3alias", "--ol-s3", ".mrap", "--x-s3", "--table-s3")
+    if candidate.endswith(reserved_suffixes):
+        return False, "reserved_suffix"
+
+    # Keep bucket findings focused on true bucket-name signals, not endpoint families.
+    if "s3-accesspoint" in candidate or "s3-control" in candidate:
+        return False, "endpoint_family"
+
+    return True, ""
 
 
 def sanitize_azure_container_label(value: str) -> str:
@@ -237,15 +267,22 @@ def classify_s3_head_status(status: int, region: str) -> str:
     return "unknown"
 
 
+def build_s3_rest_endpoint(bucket: str, region: str = "") -> str:
+    if region:
+        return f"https://{bucket}.s3.{region}.amazonaws.com"
+    return f"https://{bucket}.s3.amazonaws.com"
+
+
 def probe_s3_list_access(
     bucket: str,
     timeout: int,
+    region: str = "",
     *,
     fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
     parse_s3_error_code: Callable[[dict[str, str], str], str],
     cloud_probe_http_retries: int,
 ) -> tuple[int, dict[str, str], str]:
-    url = f"https://{bucket}.s3.amazonaws.com/?list-type=2&max-keys=0"
+    url = f"{build_s3_rest_endpoint(bucket, region)}/?list-type=2&max-keys=0"
     status, body, headers = fetch_url(
         url, timeout=timeout, method="GET", retries=cloud_probe_http_retries
     )
@@ -255,42 +292,72 @@ def probe_s3_list_access(
 def probe_s3_object_access(
     bucket: str,
     timeout: int,
+    region: str = "",
     *,
     fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
     parse_s3_error_code: Callable[[dict[str, str], str], str],
     cloud_probe_http_retries: int,
 ) -> tuple[int, dict[str, str], str]:
     probe_key = f"__subrecon_probe__{time_ns()}"
-    url = f"https://{bucket}.s3.amazonaws.com/{probe_key}"
+    url = f"{build_s3_rest_endpoint(bucket, region)}/{probe_key}"
     status, body, headers = fetch_url(
         url, timeout=timeout, method="GET", retries=cloud_probe_http_retries
     )
     return status, headers, parse_s3_error_code(headers, body)
 
 
+def probe_s3_website_access(
+    bucket: str,
+    region: str,
+    timeout: int,
+    *,
+    fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
+    parse_s3_error_code: Callable[[dict[str, str], str], str],
+    cloud_probe_http_retries: int,
+) -> tuple[int, dict[str, str], str]:
+    # S3 website endpoints are HTTP-only.
+    website_hosts = [
+        f"{bucket}.s3-website-{region}.amazonaws.com",
+        f"{bucket}.s3-website.{region}.amazonaws.com",
+    ]
+    for host in website_hosts:
+        status, body, headers = fetch_url(
+            f"http://{host}/",
+            timeout=timeout,
+            method="GET",
+            retries=cloud_probe_http_retries,
+        )
+        if status != 0:
+            return status, headers, parse_s3_error_code(headers, body)
+    return 0, {}, ""
+
+
 def check_single_bucket_exists(
     bucket: str,
     timeout: int,
     s3_list_probe: bool = True,
+    s3_website_probe: bool = False,
+    s3_probe_retries: int = 0,
     *,
     fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
     classify_s3_head_status: Callable[[int, str], str],
-    probe_s3_list_access: Callable[[str, int], tuple[int, dict[str, str], str]],
-    probe_s3_object_access: Callable[[str, int], tuple[int, dict[str, str], str]],
+    probe_s3_list_access: Callable[[str, int, str], tuple[int, dict[str, str], str]],
+    probe_s3_object_access: Callable[[str, int, str], tuple[int, dict[str, str], str]],
+    probe_s3_website_access: Callable[[str, str, int], tuple[int, dict[str, str], str]],
     cloud_probe_http_retries: int,
 ) -> tuple[str, Optional[int], str, str, Optional[int]]:
-    url = f"https://{bucket}.s3.amazonaws.com/"
-    status, _, headers = fetch_url(
-        url, timeout=timeout, method="HEAD", retries=cloud_probe_http_retries
-    )
+    retries = max(cloud_probe_http_retries, int(s3_probe_retries))
+    url = f"{build_s3_rest_endpoint(bucket)}/"
+    status, _, headers = fetch_url(url, timeout=timeout, method="HEAD", retries=retries)
 
     region = headers.get("x-amz-bucket-region") or headers.get("X-Amz-Bucket-Region")
     existence = classify_s3_head_status(status, region or "")
     list_status: Optional[int] = None
 
     if s3_list_probe and existence == "unknown":
+        list_region = region or ""
         list_status, list_headers, _list_error_code = probe_s3_list_access(
-            bucket, timeout
+            bucket, timeout, list_region
         )
         if list_status == 200:
             existence = "confirmed_exists"
@@ -305,7 +372,7 @@ def check_single_bucket_exists(
 
     if existence == "unknown":
         object_status, object_headers, object_error_code = probe_s3_object_access(
-            bucket, timeout
+            bucket, timeout, region or ""
         )
         if not region:
             region = object_headers.get("x-amz-bucket-region") or object_headers.get(
@@ -323,6 +390,19 @@ def check_single_bucket_exists(
         elif object_status == 404 and object_error_code == "NoSuchBucket":
             existence = "not_exists"
 
+    if s3_website_probe and existence == "unknown" and region:
+        website_status, _website_headers, website_error_code = probe_s3_website_access(
+            bucket, region, timeout
+        )
+        if website_status == 200:
+            existence = "confirmed_exists"
+        elif website_status == 403:
+            existence = "likely_exists"
+        elif website_status in {301, 302, 307, 308}:
+            existence = "likely_exists"
+        elif website_status == 404 and website_error_code == "NoSuchBucket":
+            existence = "not_exists"
+
     return bucket, status, existence, region or "", list_status
 
 
@@ -333,14 +413,36 @@ def collect_s3_bucket_findings(
     *,
     build_bucket_wordlist: Callable[[ScanContext, set[str]], set[str]],
     check_single_bucket_exists: Callable[
-        [str, int, bool], tuple[str, Optional[int], str, str, Optional[int]]
+        [str, int, bool, bool, int], tuple[str, Optional[int], str, str, Optional[int]]
     ],
+    validate_s3_bucket_name: Callable[[str], tuple[bool, str]],
     log: Callable[[str, bool, bool], None],
 ) -> list[Finding]:
     findings: list[Finding] = []
-    candidates = sorted(build_bucket_wordlist(context, hosts))
+    raw_candidates = sorted(build_bucket_wordlist(context, hosts))
+    reason_counts: dict[str, int] = {}
+    candidates: list[str] = []
+    for candidate in raw_candidates:
+        valid, reason = validate_s3_bucket_name(candidate)
+        if valid:
+            candidates.append(candidate)
+            continue
+        if reason:
+            reason_counts[reason] = int(reason_counts.get(reason, 0)) + 1
+
+    stats["raw_candidates"] = len(raw_candidates)
+    stats["filtered_invalid_candidates"] = len(raw_candidates) - len(candidates)
+    stats["filtered_reasons"] = reason_counts
+    stats["filtered_endpoint_family"] = int(reason_counts.get("endpoint_family", 0))
+    stats["filtered_reserved_name"] = int(
+        reason_counts.get("reserved_suffix", 0)
+    ) + int(reason_counts.get("reserved_prefix", 0))
     if not candidates:
         stats["status"] = "ok_no_candidates"
+        if raw_candidates:
+            stats["notes"].append(
+                "all generated S3 candidates were invalid by AWS naming rules"
+            )
         return findings
 
     stats["queried"] = len(candidates)
@@ -366,6 +468,8 @@ def collect_s3_bucket_findings(
                 bucket,
                 context.timeout,
                 context.s3_list_probe,
+                context.s3_website_probe,
+                context.s3_probe_retries,
             ): bucket
             for bucket in candidates
         }

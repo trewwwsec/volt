@@ -259,6 +259,60 @@ def build_bucket_wordlist(
     return candidates
 
 
+def build_gcp_bucket_wordlist(
+    context: ScanContext,
+    discovered_hosts: set[str],
+    *,
+    build_bucket_wordlist: Callable[[ScanContext, set[str]], set[str]],
+    sanitize_bucket_label: Callable[[str], str],
+) -> set[str]:
+    candidates = set(build_bucket_wordlist(context, discovered_hosts))
+    dotted_candidates: set[str] = set()
+
+    domain_roots = [
+        domain.strip().lower().rstrip(".")
+        for domain in context.domains
+        if domain and "." in domain
+    ]
+
+    common_prefixes = {
+        "assets",
+        "backup",
+        "cdn",
+        "data",
+        "files",
+        "media",
+        "static",
+        "uploads",
+    }
+
+    for root in domain_roots:
+        dotted_candidates.add(root)
+        for prefix in common_prefixes:
+            dotted_candidates.add(f"{prefix}.{root}")
+
+    for kw in context.keywords:
+        label = sanitize_bucket_label(kw).replace(".", "-").strip("-")
+        if not label:
+            continue
+        for root in domain_roots:
+            dotted_candidates.add(f"{label}.{root}")
+
+    for host in discovered_hosts:
+        normalized = host.strip().lower().rstrip(".")
+        if not normalized or "." not in normalized:
+            continue
+        dotted_candidates.add(normalized)
+        parts = normalized.split(".")
+        if len(parts) >= 2:
+            dotted_candidates.add(".".join(parts[-2:]))
+        if len(parts) >= 3:
+            dotted_candidates.add(".".join(parts[-3:]))
+
+    candidates.update(candidate for candidate in dotted_candidates if candidate)
+    return candidates
+
+
 def parse_azure_error_code(headers: dict[str, str], body: str) -> str:
     for key, value in headers.items():
         if key.lower() == "x-ms-error-code" and value.strip():
@@ -680,7 +734,7 @@ def collect_gcp_bucket_findings(
     hosts: set[str],
     stats: dict[str, Any],
     *,
-    build_bucket_wordlist: Callable[[ScanContext, set[str]], set[str]],
+    build_gcp_bucket_wordlist: Callable[[ScanContext, set[str]], set[str]],
     check_single_gcp_bucket_exists: Callable[
         [str, int], tuple[str, Optional[int], str, Optional[int]]
     ],
@@ -688,7 +742,7 @@ def collect_gcp_bucket_findings(
     log: Callable[[str, bool, bool], None],
 ) -> list[Finding]:
     findings: list[Finding] = []
-    raw_candidates = sorted(build_bucket_wordlist(context, hosts))
+    raw_candidates = sorted(build_gcp_bucket_wordlist(context, hosts))
     reason_counts: dict[str, int] = {}
     candidates: list[str] = []
     for candidate in raw_candidates:

@@ -690,6 +690,18 @@ class SubreconPipelineTest(unittest.TestCase):
             (False, "ip_address_style"),
         )
 
+    def test_build_gcp_bucket_wordlist_includes_dotful_candidates(self) -> None:
+        ctx = self._default_context()
+        ctx.keywords = ["portal"]
+        ctx.max_bucket_candidates = 200
+        candidates = subrecon.build_gcp_bucket_wordlist(
+            ctx, {"assets.example.com", "api.dev.example.com"}
+        )
+        self.assertIn("example.com", candidates)
+        self.assertIn("assets.example.com", candidates)
+        self.assertIn("api.dev.example.com", candidates)
+        self.assertIn("portal.example.com", candidates)
+
     @patch("builtins.print")
     @patch("subrecon.check_single_bucket_exists")
     def test_collect_s3_bucket_findings_skips_unknown_signals(
@@ -724,6 +736,7 @@ class SubreconPipelineTest(unittest.TestCase):
         mock_gcp_check.side_effect = fake_check
         ctx = self._default_context()
         ctx.keywords = ["mybucket"]
+        ctx.max_bucket_candidates = 200
         findings = subrecon.collect_gcp_bucket_findings(ctx, hosts=set())
         by_asset = {f.asset: f for f in findings}
         self.assertIn("mybucket", by_asset)

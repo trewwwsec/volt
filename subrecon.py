@@ -66,6 +66,7 @@ from sources.search import (
 from sources.storage import (
     build_azure_container_wordlist as build_azure_container_wordlist_source,
     build_bucket_wordlist as build_bucket_wordlist_source,
+    build_gcp_bucket_wordlist as build_gcp_bucket_wordlist_source,
     check_single_azure_blob_container as check_single_azure_blob_container_source,
     check_single_bucket_exists as check_single_bucket_exists_source,
     check_single_gcp_bucket_exists as check_single_gcp_bucket_exists_source,
@@ -497,6 +498,17 @@ def build_bucket_wordlist(context: ScanContext, discovered_hosts: set[str]) -> s
     )
 
 
+def build_gcp_bucket_wordlist(
+    context: ScanContext, discovered_hosts: set[str]
+) -> set[str]:
+    return build_gcp_bucket_wordlist_source(
+        context,
+        discovered_hosts,
+        build_bucket_wordlist=build_bucket_wordlist,
+        sanitize_bucket_label=sanitize_bucket_label,
+    )
+
+
 def classify_s3_head_status(status: int, region: str) -> str:
     return classify_s3_head_status_source(status, region)
 
@@ -611,7 +623,7 @@ def collect_gcp_bucket_findings(
         context,
         hosts,
         stats,
-        build_bucket_wordlist=build_bucket_wordlist,
+        build_gcp_bucket_wordlist=build_gcp_bucket_wordlist,
         check_single_gcp_bucket_exists=check_single_gcp_bucket_exists,
         validate_gcp_bucket_name=validate_gcp_bucket_name,
         log=log,

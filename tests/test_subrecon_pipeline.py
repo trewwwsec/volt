@@ -771,6 +771,48 @@ class SubreconPipelineTest(unittest.TestCase):
             health.get("filtered_reasons", {}).get("reserved_prefix", 0), 0
         )
 
+    @patch("subrecon.check_single_gcp_bucket_exists")
+    def test_collect_gcp_bucket_findings_suppresses_weak_likely_generic_name(
+        self, mock_gcp_check
+    ) -> None:
+        def fake_check(
+            bucket: str, timeout: int, gcp_dual_endpoint_probe: bool = False
+        ):
+            if bucket == "backup":
+                return bucket, 403, "likely_exists", None
+            return bucket, 404, "unknown", None
+
+        mock_gcp_check.side_effect = fake_check
+        ctx = self._default_context()
+        ctx.keywords = []
+        ctx.max_bucket_candidates = 200
+        health = subrecon.init_source_health("gcp")
+        findings = subrecon.collect_gcp_bucket_findings(
+            ctx, hosts={"backup.example.com"}, health=health
+        )
+        self.assertEqual(findings, [])
+        self.assertGreater(health.get("suppressed_weak_likely", 0), 0)
+
+    @patch("subrecon.check_single_gcp_bucket_exists")
+    def test_collect_gcp_bucket_findings_keeps_likely_with_target_affinity(
+        self, mock_gcp_check
+    ) -> None:
+        def fake_check(
+            bucket: str, timeout: int, gcp_dual_endpoint_probe: bool = False
+        ):
+            if bucket == "backup":
+                return bucket, 403, "likely_exists", None
+            return bucket, 404, "unknown", None
+
+        mock_gcp_check.side_effect = fake_check
+        ctx = self._default_context()
+        ctx.domains = []
+        ctx.organization = ""
+        ctx.keywords = ["acme", "backup"]
+        ctx.max_bucket_candidates = 200
+        findings = subrecon.collect_gcp_bucket_findings(ctx, hosts=set())
+        self.assertTrue(any(f.asset == "backup" for f in findings))
+
     @patch("subrecon.fetch_url")
     def test_check_single_gcp_bucket_exists_uses_nosuchbucket_signal(
         self, mock_fetch_url

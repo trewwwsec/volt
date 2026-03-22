@@ -810,6 +810,45 @@ def collect_gcp_bucket_findings(
     log: Callable[[str, bool, bool], None],
 ) -> list[Finding]:
     findings: list[Finding] = []
+    generic_collision_candidates = {
+        "assets",
+        "backup",
+        "backups",
+        "cdn",
+        "data",
+        "data-lake",
+        "files",
+        "logs",
+        "media",
+        "my-bucket",
+        "mybucket",
+        "raw-data",
+        "static",
+        "terraform-state",
+        "terraform-state-prod",
+        "test-bucket",
+        "tf-state",
+        "tfstate",
+        "uploads",
+    }
+    affinity_terms: set[str] = set()
+
+    def add_affinity_terms(value: str) -> None:
+        for token in re.split(r"[^a-z0-9]+", value.lower()):
+            if len(token) >= 4:
+                affinity_terms.add(token)
+
+    for domain in context.domains:
+        add_affinity_terms(domain)
+    if context.organization:
+        add_affinity_terms(context.organization)
+    for keyword in context.keywords:
+        add_affinity_terms(keyword)
+
+    def has_target_affinity(candidate: str) -> bool:
+        normalized = candidate.lower().replace(".", "-")
+        return any(term in normalized for term in affinity_terms)
+
     raw_candidates = sorted(build_gcp_bucket_wordlist(context, hosts))
     reason_counts: dict[str, int] = {}
     candidates: list[str] = []
@@ -848,6 +887,7 @@ def collect_gcp_bucket_findings(
 
     checked = 0
     ambiguous = 0
+    suppressed_weak_likely = 0
     with ThreadPoolExecutor(max_workers=context.threads) as pool:
         futures = {
             pool.submit(
@@ -880,6 +920,16 @@ def collect_gcp_bucket_findings(
                     "gcp_probe_failed",
                     detail=f"bucket={bucket} head_status={status}",
                 )
+                continue
+            normalized_candidate = bucket.lower().replace(".", "-")
+            if (
+                existence == "likely_exists"
+                and status == 403
+                and normalized_candidate in generic_collision_candidates
+                and not has_target_affinity(bucket)
+            ):
+                suppressed_weak_likely += 1
+                ambiguous += 1
                 continue
             if existence in {"not_exists", "unknown"}:
                 ambiguous += 1
@@ -935,6 +985,7 @@ def collect_gcp_bucket_findings(
             )
 
     stats["ambiguous"] = ambiguous
+    stats["suppressed_weak_likely"] = suppressed_weak_likely
     stats["hosts"] = len(findings)
     stats["findings"] = len(findings)
     if stats["errors"]:

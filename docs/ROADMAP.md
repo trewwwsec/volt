@@ -180,3 +180,46 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
    - Why: reduces false attribution and keeps findings scoped to true bucket ownership signals.
 5. Add optional low cloud-probe retry budget (`0 -> 1`) with jittered backoff.
    - Why: improves resilience against transient network/edge failures while preserving conservative defaults.
+
+### GCS: High-Impact Enumeration + Detection Plan (Research-Based)
+
+1. Add strict GCS bucket-name validation before probing.
+   - Include GCS-specific rules: `3-63` chars (or dotful names up to `222`), no IP-style names, no `goog*` prefix, and no `google`/close misspellings.
+   - Why: removes invalid probes early and prevents wasted budget on impossible candidates.
+
+2. Add dedicated GCS name-generation tracks for domain-style buckets.
+   - Keep current hyphenated candidates, and add high-signal dotful candidates from owned domains/hostnames (for example `assets.example.com`), because dotful bucket names are first-class in GCS.
+   - Why: materially improves discovery for static-site and domain-aligned bucket naming.
+
+3. Add XML error-code parsing for GCS responses and classify by error code, not status alone.
+   - Parse `<Code>` from XML responses (`AccessDenied`, `NoSuchBucket`, etc.) for list/object probes.
+   - Why: `403` and `404` are much more actionable when paired with XML code, reducing ambiguous outcomes.
+
+4. Add second-phase object probe (`GET /<random-probe-key>`) to disambiguate existence.
+   - Keep `HEAD` + list probe as primary path, then run object probe only when still ambiguous.
+   - Why: improves true/false existence classification while preserving low-touch behavior.
+
+5. Add optional dual-endpoint probing (path-style + virtual-hosted style) with conservative default.
+   - Probe `https://storage.googleapis.com/<bucket>/...` first; optionally fall back to `https://<bucket>.storage.googleapis.com/...` on ambiguous responses.
+   - Why: increases resilience across endpoint behaviors and catches edge cases without changing default operator UX.
+
+6. Add confidence guardrails for globally common bucket names.
+   - Down-rank or suppress weak `likely_exists` hits when candidate origin is generic (for example single common noun) and target affinity is low.
+   - Why: global bucket namespace creates many unrelated `403 AccessDenied` collisions; this improves signal precision.
+
+7. Expand GCS source-health telemetry.
+   - Track `raw_candidates`, `filtered_invalid_candidates`, `filtered_reasons`, `error_code_counts`, `ambiguous`, and `suppressed_weak_likely`.
+   - Why: gives operators transparent diagnostics and supports reliable tuning.
+
+8. Add optional low retry budget for GCS cloud probes (`0 -> 1`) with existing jitter/backoff path.
+   - Why: hardens live reliability under transient network/CDN failures while preserving current defaults.
+
+### GCS Implementation Order (Small PR-Style Sequence)
+
+1. PR1: GCS name validator + candidate filtering + telemetry fields.
+2. PR2: Dotful/domain-style candidate generation path (behind conservative defaults if needed).
+3. PR3: XML error-code parser + classification matrix updates (`NoSuchBucket` vs `AccessDenied`).
+4. PR4: Second-phase random object probe for ambiguous candidates.
+5. PR5: Optional dual-endpoint fallback behavior + tests.
+6. PR6: Confidence guardrails for generic-name collisions + report note updates.
+7. PR7: Optional GCS probe retry budget + reliability tests + live-smoke refresh.

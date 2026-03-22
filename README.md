@@ -17,7 +17,7 @@ It is designed for legal-safe OSINT workflows: no port scanning, no exploitation
   - backup/archive artifacts
   - `.git/config`
 - Generates likely cloud storage names from organization/domain signals and checks:
-  - AWS S3 bucket endpoints with `HEAD` plus automatic list-probe fallback (`ListObjectsV2` with `max-keys=0`) for ambiguous responses
+  - AWS S3 bucket endpoints with strict AWS name validation, `HEAD` plus automatic region-aware list-probe fallback (`ListObjectsV2` with `max-keys=0`) for ambiguous responses, and optional website-endpoint probes
   - Google Cloud Storage (GCS) bucket endpoints with `HEAD` plus list probe fallback
   - Azure Blob containers inferred from discovered-host CNAMEs (`*.blob.core.windows.net`) with anonymous list probes
 - Checks discovered subdomains for takeover signals using CNAME provider matching plus landing-page fingerprint validation
@@ -148,6 +148,8 @@ uv run subrecon -d example.com --no-search --no-s3
 --max-bucket-candidates Max cloud storage names to check per module (default: 300)
 --s3-list-probe        Enable anonymous ListObjectsV2 fallback probes (default: enabled)
 --no-s3-list-probe     Disable anonymous ListObjectsV2 fallback probes
+--s3-website-probe     Enable optional S3 static website endpoint probe (default: disabled)
+--s3-probe-retries     Extra retry budget for S3 probes (choices: 0 or 1, default: 0)
 --no-ct                Disable CT log collection
 --no-subfinder         Disable passive subdomain collection via subfinder
 --no-amass             Disable passive subdomain collection via amass
@@ -216,6 +218,8 @@ A finding includes:
 - HTTP retry behavior is conservative and source-specific (CT/search retry, takeover lighter retry, cloud probe checks remain no-retry by default).
 - If S3 checks return `0` with an "ambiguous responses" note, AWS `HeadBucket` responses were inconclusive (generic `400/403/404` without enough signal). The tool automatically attempts an anonymous `ListObjectsV2` fallback probe (`max-keys=0`).
 - Use `--no-s3-list-probe` only if you need strict HEAD-only behavior.
+- Use `--s3-website-probe` if you want additional static-site exposure signal (`s3-website-<region>` endpoints).
+- Use `--s3-probe-retries 1` in unstable environments; default remains `0` for low-noise behavior.
 - If search findings are unexpectedly empty, run with `--search-providers commoncrawl` and check `source_health.search` in the report.
 - GCP bucket findings are heuristic (`200` strong signal, `403` likely-exists signal); treat low-severity bucket existence as triage leads.
 - Azure Blob findings currently report high-signal anonymous listability only (`HTTP 200` on list probes); `source_health.azure` still tracks inferred accounts/probe counts when no findings are returned.

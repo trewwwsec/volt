@@ -99,10 +99,84 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
 - Operator docs include triage workflow for indexed-leak/cloud/takeover findings.
 - CI includes a non-blocking bounded live smoke job for upstream-source drift detection.
 
+### Phase 5: 8-Week Delivery Checkpoints
+
+- Week 1: Product lock and acceptance criteria
+  - Freeze customer-facing MVP scope and non-goals.
+  - Define launch gates and map each gate to measurable checks.
+  - Deliverable: `docs/ROADMAP.md` + release checklist updated with final gates.
+- Week 2: Distribution and install UX
+  - Ship installable package with `subrecon` console entrypoint.
+  - Add `--version` and version source-of-truth.
+  - Deliverable: install docs validated on clean environment (`pipx` and `uv tool`).
+- Week 3: Safe defaults and operator UX
+  - Default search providers to `commoncrawl` and document `bing` as opt-in.
+  - Improve degraded-mode messaging and operator guidance in `source_health` notes.
+  - Deliverable: updated defaults + docs + regression tests.
+- Week 4: Reliability hardening
+  - Expand edge-case handling for upstream parsing/drift and provider outages.
+  - Add deterministic report fixture tests for schema/output stability.
+  - Deliverable: green test suite with new reliability-focused coverage.
+- Week 5: CI operational readiness
+  - Add scheduled/manual bounded live-smoke CI job (non-blocking).
+  - Keep deterministic unit/lint/compile checks as blocking merge gates.
+  - Deliverable: CI workflow(s) merged with clear pass/fail semantics.
+- Week 6: Security and release governance
+  - Add/validate `SECURITY.md`, disclosure flow, and release-note standards.
+  - Add contributor and support-path documentation.
+  - Deliverable: governance docs merged and linked from README.
+- Week 7: Customer documentation and pilot prep
+  - Publish quickstart, finding-interpretation, and triage playbooks.
+  - Prepare pilot runbook and issue-triage process.
+  - Deliverable: customer docs set complete and review-ready.
+- Week 8: Pilot execution and launch decision
+  - Run pilot with authorized design partners and collect run quality metrics.
+  - Triage blockers, cut release candidate, and make go/no-go decision.
+  - Deliverable: `v1.0.0` tag if launch gates pass.
+
+### Milestone Issues (Ready To File)
+
+- Milestone `M5-A` (Weeks 1-2): Distribution Foundation
+  - Issue: Add installable package metadata and `subrecon` console entrypoint.
+    - Acceptance: `pipx install .` and `uv tool install .` both expose `subrecon --help`.
+  - Issue: Add `--version` and centralized version management.
+    - Acceptance: CLI reports project version and release process updates version in one place.
+  - Issue: Add release checklist and first tagged release workflow.
+    - Acceptance: documented checklist used to cut a reproducible release candidate.
+
+- Milestone `M5-B` (Weeks 3-5): Reliability and Operator UX
+  - Issue: Default search provider configuration to `commoncrawl` and document `bing` opt-in.
+    - Acceptance: CLI defaults changed, docs updated, and parser/provider tests pass.
+  - Issue: Improve degraded-mode guidance in `source_health` and terminal output.
+    - Acceptance: partial/error runs include actionable operator notes with deterministic formatting.
+  - Issue: Add report fixture tests and upstream-drift reliability tests.
+    - Acceptance: new tests validate stable schema ordering and common source-failure scenarios.
+  - Issue: Add non-blocking bounded live-smoke CI workflow.
+    - Acceptance: workflow runs on schedule/manual trigger and publishes artifacts/results.
+
+- Milestone `M5-C` (Weeks 6-8): Customer Readiness and Launch
+  - Issue: Finalize governance docs (`SECURITY.md`, `CONTRIBUTING.md`, support policy links).
+    - Acceptance: docs merged, linked from README, and tested for clarity in onboarding.
+  - Issue: Publish customer docs (quickstart + finding triage playbooks).
+    - Acceptance: new user can complete first successful scan and triage sample findings in under 10 minutes.
+  - Issue: Run pilot and track launch gates.
+    - Acceptance: pilot metrics recorded; go/no-go decision logged; `v1.0.0` tagged on pass.
+
 ## Immediate Next Actions
 
-- [x] Add packaging metadata + CLI entry point and validate install flow (`uv tool install` and `pipx`).
-- [x] Change default search provider set to `commoncrawl` and document `bing` as optional/best-effort.
-- [x] Add `CHANGELOG.md` + `SECURITY.md` and define first tagged release checklist.
-- [x] Add a scheduled/manual bounded live-smoke CI workflow and keep it non-blocking.
-- [x] Refresh `docs/TESTING.md` baseline counts and snapshots as part of each release cut.
+1. Open `M5-A` issues and assign owners/due dates this week.
+2. Implement packaging + entrypoint + `--version` before changing additional scan logic.
+3. Start Week 3 defaults/doc changes immediately after install UX is verified on a clean environment.
+
+### S3: High-Impact Improvements To Prioritize Next
+
+1. Add strict AWS-valid bucket-name filtering before probe execution.
+   - Why: reduces wasted probes and increases useful signal density.
+2. Add region-aware second-phase probes using `x-amz-bucket-region` from initial `HEAD` responses.
+   - Why: improves existence classification when global endpoint responses are ambiguous.
+3. Add optional S3 website-endpoint probing (`s3-website-<region>`) for static-site exposure.
+   - Why: catches website-hosted buckets that REST endpoint-only probing can miss.
+4. Add endpoint-family awareness in classification (bucket vs access-point/MRAP alias patterns).
+   - Why: reduces false attribution and keeps findings scoped to true bucket ownership signals.
+5. Add optional low cloud-probe retry budget (`0 -> 1`) with jittered backoff.
+   - Why: improves resilience against transient network/edge failures while preserving conservative defaults.

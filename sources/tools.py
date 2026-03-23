@@ -5,6 +5,8 @@ from typing import Any, Callable
 from core import record_source_error
 from models import Evidence, Finding, ScanContext
 
+AMASS_TIMEOUT_GRACE_SECONDS = 30
+
 
 def collect_subfinder_subdomains(
     context: ScanContext,
@@ -140,6 +142,9 @@ def collect_amass_subdomains(
     for domain in context.domains:
         stats["queried"] += 1
         amass_timeout_minutes = max(1, (context.tool_timeout + 59) // 60)
+        amass_command_timeout = (
+            amass_timeout_minutes * 60
+        ) + AMASS_TIMEOUT_GRACE_SECONDS
         base_cmd = [
             "amass",
             "enum",
@@ -163,7 +168,7 @@ def collect_amass_subdomains(
         cmd_plain = [*base_cmd]
         cmd_plain_timeout_retry = [*base_cmd, "-nocolor", "-silent", "-norecursive"]
 
-        rc, stdout, stderr = run_command(cmd_with_src, timeout=context.tool_timeout)
+        rc, stdout, stderr = run_command(cmd_with_src, timeout=amass_command_timeout)
         used_structured_mode = True
         err_text = f"{stderr}\n{stdout}".lower()
         if rc != 0 and amass_src_unsupported_error in err_text:
@@ -178,7 +183,7 @@ def collect_amass_subdomains(
                 f"    [amass] {domain}: local amass does not support -src; retrying without -src"
             )
             rc, stdout, stderr = run_command(
-                cmd_without_src, timeout=context.tool_timeout
+                cmd_without_src, timeout=amass_command_timeout
             )
             err_text = f"{stderr}\n{stdout}".lower()
 
@@ -194,7 +199,7 @@ def collect_amass_subdomains(
             print(
                 f"    [amass] {domain}: local amass does not support -json; retrying plain output mode"
             )
-            rc, stdout, stderr = run_command(cmd_plain, timeout=context.tool_timeout)
+            rc, stdout, stderr = run_command(cmd_plain, timeout=amass_command_timeout)
 
         structured: dict[str, set[str]] = {}
         if used_structured_mode:
@@ -223,7 +228,7 @@ def collect_amass_subdomains(
                 )
                 rc, stdout, stderr = run_command(
                     cmd_plain_timeout_retry,
-                    timeout=context.tool_timeout,
+                    timeout=amass_command_timeout,
                 )
                 parsed = parse_hosts_from_output(f"{stdout}\n{stderr}", domain)
                 for host in parsed:

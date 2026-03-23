@@ -641,6 +641,7 @@ class SubreconPipelineTest(unittest.TestCase):
         cmd = mock_run_command.call_args[0][0]
         self.assertIn("-src", cmd)
         self.assertIn("-json", cmd)
+        self.assertEqual(mock_run_command.call_args.kwargs.get("timeout"), 90)
 
     @patch("subrecon.run_command")
     @patch("subrecon.check_tool")

@@ -21,6 +21,7 @@ MODE="quick"
 OUT_DIR=""
 SKIP_GATES=0
 SKIP_LIVE=0
+AMASS_TOOL_TIMEOUT="${PILOT_AMASS_TOOL_TIMEOUT:-300}"
 
 usage() {
   cat <<'EOF'
@@ -80,6 +81,7 @@ echo "[*] pilot test output dir: $OUT_DIR"
 echo "[*] mode: $MODE"
 echo "[*] uv cache dir: $UV_CACHE_DIR"
 echo "[*] repo root: $REPO_ROOT"
+echo "[*] amass tool-timeout override (seconds): $AMASS_TOOL_TIMEOUT"
 
 if [[ $SKIP_GATES -eq 0 ]]; then
   echo "[*] running deterministic quality gates..."
@@ -192,7 +194,7 @@ if [[ "$MODE" == "full" ]]; then
     uv run subrecon -d iana.org --no-ct --no-amass --no-search --no-s3 --no-gcp --no-azure --no-takeover
 
   run_case amass_only_iana \
-    uv run subrecon -d iana.org --no-ct --no-subfinder --no-search --no-s3 --no-gcp --no-azure --no-takeover
+    uv run subrecon -d iana.org --tool-timeout "$AMASS_TOOL_TIMEOUT" --no-ct --no-subfinder --no-search --no-s3 --no-gcp --no-azure --no-takeover
 fi
 
 echo "[*] building summary..."

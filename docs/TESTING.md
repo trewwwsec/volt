@@ -10,7 +10,7 @@ Run all tests:
 uv run python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Current baseline (March 22, 2026): `111` tests passing.
+Current baseline (March 22, 2026): `115` tests passing.
 
 CI gate:
 
@@ -37,6 +37,7 @@ Current suite covers:
 - CT fallback path (`crt.sh` -> Cert Spotter) with degraded (`partial`) source-health semantics
 - S3 `HEAD` + fallback `ListObjectsV2` classification path
 - S3 candidate validation filtering (reserved/invalid names), region-aware probe wiring, optional website probe path, and probe-retry override
+- S3 cloaked-`NoSuchBucket` ambiguity handling + unknown-region website endpoint fallback probing
 - GCS candidate validation filtering, domain-style candidate generation, XML error-code classification, second-phase object probe, optional dual-endpoint fallback, and probe-retry override
 - Azure Blob CNAME/account inference + endpoint-aware HEAD/list classification path
 - Azure Blob optional blob-object probe path and optional probe-retry override
@@ -61,6 +62,7 @@ Use targeted tests to validate reliability state transitions without external de
 uv run python -m unittest tests.test_subrecon_pipeline.SubreconPipelineTest.test_collect_ct_subdomains_partial_when_some_domains_fail
 uv run python -m unittest tests.test_subrecon_pipeline.SubreconPipelineTest.test_collect_search_index_findings_commoncrawl_index_failure_sets_error
 uv run python -m unittest tests.test_subrecon_pipeline.SubreconPipelineTest.test_collect_s3_bucket_findings_error_when_all_checks_fail
+uv run python -m unittest tests.test_subrecon_pipeline.SubreconPipelineTest.test_collect_s3_bucket_findings_partial_when_some_checks_succeed
 uv run python -m unittest tests.test_subrecon_pipeline.SubreconPipelineTest.test_collect_azure_blob_findings_partial_when_doh_errors
 uv run python -m unittest tests.test_subrecon_pipeline.SubreconPipelineTest.test_collect_subdomain_takeover_findings_partial_on_probe_error
 ```
@@ -109,13 +111,12 @@ uv run subrecon -d example.com --no-ct --no-subfinder --no-search --no-s3 --no-g
 ### Latest Smoke Snapshot (March 22, 2026)
 
 Environment: local macOS runner, passive internet-reachable execution.
+Reference bundle: `/tmp/subrecon-pilot-20260322-225939` (quick mode).
 
-- CT-only (`/tmp/subrecon_ct_smoke.json`): `source_health.ct.status=ok`, `summary.total_findings=6`
-- Search-only Common Crawl (`/tmp/subrecon_search_smoke.json`): `source_health.search.status=partial`, `summary.total_findings=4`
-- S3-only (`/tmp/subrecon_s3_smoke.json`): `source_health.s3.status=ok|ok_no_results`; target selected by `scripts/select_s3_canary.py` (or deterministic negative-control fallback if no viable canary resolves)
-- GCS-only (`/tmp/subrecon_gcp_smoke.json`): `source_health.gcp.status=ok`, `summary.total_findings=2`
-- Azure direct probe (`check_single_azure_blob_container`): `status=200`, `existence=confirmed_public` on `azureopendatastorage/nyctlc` with default retries and `azure_probe_retries=1`
-- Takeover-focused (`/tmp/subrecon_takeover_smoke.json`): run as CT+takeover (`--no-subfinder --no-amass`) to keep runtime bounded; `source_health.takeover.status=ok_no_results`, `summary.total_findings=6` (CT inventory findings)
+- Core E2E (`core_e2e_iana.json`): `source_health.ct=ok`, `search=partial`, `s3=ok_no_results`, `gcp=ok`, `azure=ok_no_results`, `takeover=ok_no_results`, `summary.total_findings=56`
+- S3-only canary (`s3_only_canary.json`): `source_health.s3=ok`, `summary.total_findings=1`
+- GCS-only (`gcs_only_landsat.json`): `source_health.gcp=ok`, `summary.total_findings=2`
+- Azure direct probe (`azure_probe_default.txt` + `azure_probe_retry1.txt`): `status=200`, `existence=confirmed_public` on `azureopendatastorage/nyctlc`
 
 ## Rigorous Live Matrix (Bounded E2E)
 
@@ -158,16 +159,17 @@ uv run python -c "import subrecon; print(subrecon.check_single_azure_blob_contai
 ### Latest Rigorous Matrix Snapshot (March 22, 2026)
 
 Environment: local macOS runner, passive internet-reachable execution.
+Reference bundle: `/tmp/subrecon-pilot-20260322-231020` (full mode).
 
-- Core E2E (`/tmp/subrecon_live3_core_e2e_iana.json`): `source_health.ct=ok`, `search=partial`, `s3=ok`, `gcp=ok`, `azure=ok_no_results`, `takeover=ok_no_results`, `summary.total_findings=78`
-- CT-only (`/tmp/subrecon_live3_ct_only_iana.json`): `source_health.ct=error`, `error_types.http_0=1`, `summary.total_findings=0` (transient upstream/network failure)
-- Search-only Common Crawl (`/tmp/subrecon_live3_search_only_iana.json`): `source_health.search=partial`, `error_types.commoncrawl_http_404=3`, `summary.total_findings=16`
-- S3-only (`/tmp/subrecon_live3_s3_only.json`): `source_health.s3=ok|ok_no_results`; target selected by `scripts/select_s3_canary.py` (or deterministic negative-control fallback)
-- GCS-only (`/tmp/subrecon_live3_gcp_only.json`): `source_health.gcp=ok`, `summary.total_findings=2`
-- Takeover+CT (`/tmp/subrecon_live3_takeover_ct_iana.json`): `ct=ok`, `takeover=ok_no_results`, `summary.total_findings=21`
-- Subfinder-only (`/tmp/subrecon_live3_subfinder_only_iana.json`): `source_health.subfinder=ok`, `summary.total_findings=65`
-- Amass-only (`/tmp/subrecon_live3_amass_only_iana.json`): `source_health.amass=partial`, `timeouts=1`, `errors=0`, `error_types.amass_timeout=1`, `summary.total_findings=0`
-- Azure direct probe: `status=200`, `existence=confirmed_public` on `azureopendatastorage/nyctlc` with default retries and `azure_probe_retries=1`
+- Core E2E (`core_e2e_iana.json`): `source_health.ct=ok`, `search=error`, `s3=ok_no_results`, `gcp=ok`, `azure=ok_no_results`, `takeover=ok_no_results`, `summary.total_findings=37`
+- CT-only (`ct_only_iana.json`): `source_health.ct=ok`, `summary.total_findings=21`
+- Search-only Common Crawl (`search_only_iana.json`): `source_health.search=error`, `error_types={bing_challenge_page:5, commoncrawl_index_unavailable:1}`, `summary.total_findings=0`
+- S3-only canary (`s3_only_canary.json`): `source_health.s3=ok`, `summary.total_findings=1`
+- GCS-only (`gcs_only_landsat.json`): `source_health.gcp=ok`, `summary.total_findings=2`
+- Takeover+CT (`takeover_ct_iana.json`): `ct=ok`, `takeover=ok_no_results`, `summary.total_findings=21`
+- Subfinder-only (`subfinder_only_iana.json`): `source_health.subfinder=ok`, `summary.total_findings=65`
+- Amass-only (`amass_only_iana.json`): `source_health.amass=partial`, `summary.total_findings=0` (`-src`/`-json` unsupported fallback active; plain-output compatibility mode returned no hosts)
+- Azure direct probe (`azure_probe_default.txt`, `azure_probe_retry1.txt`): `status=200`, `existence=confirmed_public` on `azureopendatastorage/nyctlc`
 
 ### Exegol Validation Snapshot (March 22, 2026)
 

@@ -168,21 +168,20 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
 2. Completed: Week 3 operator UX hardening (deterministic degraded-source guidance + notes).
 3. Completed: Week 4 reliability hardening (report fixture regression + upstream drift tests).
 4. Completed: Week 6/7 docs foundations (`CONTRIBUTING.md`, `SUPPORT.md`, quickstart, triage playbook).
-5. Next: Execute pilot runbook on authorized targets and capture launch-gate metrics.
-6. Next: Prepare release candidate cut checklist and finalize go/no-go decision log.
+5. Completed: Pilot runbook execution with bounded full matrix (`/tmp/subrecon-pilot-20260322-231020`) and launch-gate evidence capture.
+6. Next: Prepare release-candidate cut checklist refresh and finalize go/no-go log with latest search/amass caveats.
 
-### S3: High-Impact Improvements To Prioritize Next
+### S3: Completed High-Impact Improvements
 
-1. Add strict AWS-valid bucket-name filtering before probe execution.
-   - Why: reduces wasted probes and increases useful signal density.
-2. Add region-aware second-phase probes using `x-amz-bucket-region` from initial `HEAD` responses.
-   - Why: improves existence classification when global endpoint responses are ambiguous.
-3. Add optional S3 website-endpoint probing (`s3-website-<region>`) for static-site exposure.
-   - Why: catches website-hosted buckets that REST endpoint-only probing can miss.
-4. Add endpoint-family awareness in classification (bucket vs access-point/MRAP alias patterns).
-   - Why: reduces false attribution and keeps findings scoped to true bucket ownership signals.
-5. Add optional low cloud-probe retry budget (`0 -> 1`) with jittered backoff.
-   - Why: improves resilience against transient network/edge failures while preserving conservative defaults.
+1. Strict AWS-valid bucket-name filtering before probe execution.
+2. Region-aware second-phase probes using `x-amz-bucket-region` signals.
+3. Optional S3 website-endpoint probing (`--s3-website-probe`) for static-site exposure.
+4. Endpoint-family awareness in candidate validation (bucket vs access-point/MRAP aliases).
+5. Optional low retry budget for S3 probe stability (`--s3-probe-retries 1`).
+6. Passive reliability hardening for cloaked `NoSuchBucket` behavior:
+   - treat anonymous `NoSuchBucket` object/website responses as ambiguous (`unknown`) rather than definitive non-existence.
+   - probe unknown-region website endpoints across a conservative region set for stronger passive confirmation.
+7. Dynamic passive canary selection now uses website-probe-aware viability checks (`scripts/select_s3_canary.py`), with pilot harness integration.
 
 ### GCS: High-Impact Enumeration + Detection Plan (Research-Based)
 

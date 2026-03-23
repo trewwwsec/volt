@@ -27,7 +27,10 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 - Common Crawl hardening: index endpoint selection now prefers newest `CC-MAIN` collection ID, and query path now attempts `status=200` filtering with compatibility fallback for servers that reject filter syntax.
 - CT reliability hardened: when `crt.sh` is unavailable or returns invalid responses, CT collection now falls back to Cert Spotter API while preserving degraded source-health telemetry.
 - S3 live-testing reliability hardened with dynamic canary selection (`scripts/select_s3_canary.py`) and negative-control fallback when known public targets are stale/unavailable.
+- Passive S3 reliability hardened for modern cloaked responses: anonymous `NoSuchBucket` object/website results are treated as ambiguous, and optional website probing now supports unknown-region fallback scanning for stronger passive confirmation.
+- S3 canary selection now includes passive website-probe-aware viability checks (for example `toolbox2`) and pilot harness S3 cases now run with `--s3-website-probe`.
 - Testing docs updated to command-first usage (`uv run subrecon`) and refreshed baseline/snapshot notes.
+- Documentation refreshed with current deterministic baseline (`115` tests) and latest pilot snapshots/case naming.
 - Degraded `source_health` states (`partial`/`error`) now add deterministic `operator_action` notes and emit a concise terminal reliability warning block.
 - Added deterministic run-scan report fixture coverage to catch schema/output drift in CI.
 - Hardened CT/search collectors against upstream schema/parser drift by handling malformed JSON shapes and provider helper exceptions without crashing.

@@ -49,7 +49,7 @@ S3 signal check:
 ```bash
 S3_CANARY="$(uv run python scripts/select_s3_canary.py || true)"
 S3_TARGET="${S3_CANARY:-subrecon-negative-s3-$(date +%s)}"
-subrecon -d "${S3_TARGET}.test" --keywords "$S3_TARGET" --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover -o s3_report.json
+subrecon -d "${S3_TARGET}.test" --keywords "$S3_TARGET" --s3-website-probe --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover -o s3_report.json
 ```
 
 GCS signal check:

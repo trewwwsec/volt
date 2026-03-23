@@ -152,6 +152,7 @@ PY
     echo "$S3_CANARY_BUCKET" > "$OUT_DIR/s3_canary_bucket.txt"
     run_case s3_only_canary \
       uv run subrecon -d "${S3_CANARY_BUCKET}.test" --keywords "$S3_CANARY_BUCKET" \
+      --s3-website-probe \
       --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover
   else
     echo "[!] selector returned empty S3 canary bucket; using negative-control bucket case"
@@ -159,6 +160,7 @@ PY
     echo "$S3_NEGATIVE_BUCKET" > "$OUT_DIR/s3_negative_bucket.txt"
     run_case s3_only_negative_control \
       uv run subrecon -d "${S3_NEGATIVE_BUCKET}.test" --keywords "$S3_NEGATIVE_BUCKET" \
+      --s3-website-probe \
       --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover
   fi
 else
@@ -167,6 +169,7 @@ else
   echo "$S3_NEGATIVE_BUCKET" > "$OUT_DIR/s3_negative_bucket.txt"
   run_case s3_only_negative_control \
     uv run subrecon -d "${S3_NEGATIVE_BUCKET}.test" --keywords "$S3_NEGATIVE_BUCKET" \
+    --s3-website-probe \
     --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover
 fi
 

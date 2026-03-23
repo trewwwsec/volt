@@ -85,7 +85,7 @@ uv run subrecon -d example.com --search-providers commoncrawl --no-ct --no-subfi
 # S3 only (auto-select live canary; fallback to deterministic negative control)
 S3_CANARY="$(uv run python scripts/select_s3_canary.py || true)"
 S3_TARGET="${S3_CANARY:-subrecon-negative-s3-$(date +%s)}"
-uv run subrecon -d "${S3_TARGET}.test" --keywords "$S3_TARGET" --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover -o /tmp/subrecon_s3_smoke.json
+uv run subrecon -d "${S3_TARGET}.test" --keywords "$S3_TARGET" --s3-website-probe --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover -o /tmp/subrecon_s3_smoke.json
 
 # GCS bucket only (existence/listability signal)
 uv run subrecon -d gcp-public-data.test --keywords gcp-public-data-landsat --no-ct --no-subfinder --no-amass --no-search --no-s3 --no-azure --no-takeover -o /tmp/subrecon_gcp_smoke.json
@@ -134,7 +134,7 @@ uv run subrecon -d iana.org --search-providers commoncrawl --no-ct --no-subfinde
 # S3 only (auto-select live canary; fallback to deterministic negative control)
 S3_CANARY="$(uv run python scripts/select_s3_canary.py || true)"
 S3_TARGET="${S3_CANARY:-subrecon-negative-s3-$(date +%s)}"
-uv run subrecon -d "${S3_TARGET}.test" --keywords "$S3_TARGET" --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover -o /tmp/subrecon_live3_s3_only.json
+uv run subrecon -d "${S3_TARGET}.test" --keywords "$S3_TARGET" --s3-website-probe --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover -o /tmp/subrecon_live3_s3_only.json
 
 # GCS only
 uv run subrecon -d gcp-public-data.test --keywords gcp-public-data-landsat --no-ct --no-subfinder --no-amass --no-search --no-s3 --no-azure --no-takeover -o /tmp/subrecon_live3_gcp_only.json

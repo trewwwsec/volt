@@ -13,6 +13,7 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 - Non-blocking scheduled/manual live-smoke GitHub Actions workflow (`.github/workflows/live-smoke.yml`).
 - Release governance docs: `SECURITY.md` and `docs/RELEASE.md`.
 - Contributor workflow doc: `CONTRIBUTING.md`.
+- Customer onboarding docs: `docs/QUICKSTART.md` and `docs/TRIAGE.md`.
 
 ### Changed
 

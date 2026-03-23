@@ -77,6 +77,8 @@ Script-first usage (`uv run python subrecon.py ...`) remains supported for compa
   - `uv run ruff format --check .`
 
 Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md)
+Quickstart: [docs/QUICKSTART.md](docs/QUICKSTART.md)
+Triage playbook: [docs/TRIAGE.md](docs/TRIAGE.md)
 Testing: [docs/TESTING.md](docs/TESTING.md)
 Release process: [docs/RELEASE.md](docs/RELEASE.md)
 Changelog: [CHANGELOG.md](CHANGELOG.md)

@@ -79,6 +79,7 @@ Script-first usage (`uv run python subrecon.py ...`) remains supported for compa
 Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md)
 Quickstart: [docs/QUICKSTART.md](docs/QUICKSTART.md)
 Triage playbook: [docs/TRIAGE.md](docs/TRIAGE.md)
+Pilot runbook: [docs/PILOT_RUNBOOK.md](docs/PILOT_RUNBOOK.md)
 Testing: [docs/TESTING.md](docs/TESTING.md)
 Release process: [docs/RELEASE.md](docs/RELEASE.md)
 Changelog: [CHANGELOG.md](CHANGELOG.md)

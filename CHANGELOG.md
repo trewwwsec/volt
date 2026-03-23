@@ -15,6 +15,7 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 - Contributor workflow doc: `CONTRIBUTING.md`.
 - Customer onboarding docs: `docs/QUICKSTART.md` and `docs/TRIAGE.md`.
 - Project support policy: `SUPPORT.md`.
+- Pilot execution/launch decision template: `docs/PILOT_RUNBOOK.md`.
 
 ### Changed
 

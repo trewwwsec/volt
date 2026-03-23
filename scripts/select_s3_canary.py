@@ -44,7 +44,9 @@ def is_viable_probe(probe: dict[str, Any]) -> bool:
 
 
 def choose_best_probe(probes: list[dict[str, Any]]) -> dict[str, Any] | None:
-    confirmed = [probe for probe in probes if probe.get("existence") == "confirmed_exists"]
+    confirmed = [
+        probe for probe in probes if probe.get("existence") == "confirmed_exists"
+    ]
     if confirmed:
         return confirmed[0]
     likely = [probe for probe in probes if is_viable_probe(probe)]
@@ -78,12 +80,14 @@ def main() -> int:
     candidates = parse_candidates(args.candidates)
     probes: list[dict[str, Any]] = []
     for bucket in candidates:
-        _bucket, status, existence, region, list_status = subrecon.check_single_bucket_exists(
-            bucket,
-            args.timeout,
-            True,
-            False,
-            0,
+        _bucket, status, existence, region, list_status = (
+            subrecon.check_single_bucket_exists(
+                bucket,
+                args.timeout,
+                True,
+                False,
+                0,
+            )
         )
         probes.append(
             {

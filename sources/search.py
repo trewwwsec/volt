@@ -39,6 +39,29 @@ def parse_bing_results(html: str) -> list[dict[str, str]]:
     return results
 
 
+def is_bing_challenge_page(html: str) -> bool:
+    lower = html.lower()
+    has_challenge_token = any(
+        token in lower
+        for token in (
+            "cf-turnstile",
+            "captcha",
+            "challenge-platform",
+            "verifyendpoint",
+        )
+    )
+    has_human_prompt = any(
+        token in lower
+        for token in (
+            "one last step",
+            "verify you're human",
+            "verify you are human",
+            "before you continue to bing",
+        )
+    )
+    return has_challenge_token and has_human_prompt
+
+
 def build_dork_queries(domain: str) -> list[tuple[str, str]]:
     return [
         (f"site:{domain} ext:env", "dotenv"),
@@ -230,6 +253,7 @@ def collect_search_index_findings(
         [str, str, int], tuple[int, list[dict[str, str]], str]
     ],
     fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
+    is_bing_challenge_page: Callable[[str], bool],
     parse_bing_results: Callable[[str], list[dict[str, str]]],
     classify_leak: Callable[[str, str], tuple[str, str, str, list[str]]],
     log: Callable[[str, bool, bool], None],
@@ -313,6 +337,22 @@ def collect_search_index_findings(
                     )
                     log(
                         f"[search] provider=bing {domain} query='{query}' failed status={status}",
+                        context.verbose,
+                    )
+                    continue
+
+                if is_bing_challenge_page(body):
+                    provider_stats["bing"]["errors"] += 1
+                    provider_stats["bing"]["notes"].append(
+                        f"domain={domain} query={category} challenge_page"
+                    )
+                    record_source_error(
+                        stats,
+                        "bing_challenge_page",
+                        detail=f"domain={domain} query={category}",
+                    )
+                    log(
+                        f"[search] provider=bing {domain} query='{query}' challenge page detected",
                         context.verbose,
                     )
                     continue

@@ -525,6 +525,72 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(health["status"], "ok_no_results")
         self.assertEqual(health["providers"]["bing"]["status"], "ok_no_results")
 
+    @patch("subrecon.fetch_url")
+    def test_collect_search_index_findings_bing_challenge_marks_error(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.return_value = (
+            200,
+            (
+                "<html><body>One last step before you continue to Bing "
+                "<div class='cf-turnstile'></div></body></html>"
+            ),
+            {},
+        )
+        ctx = self._default_context()
+        ctx.search_providers = ["bing"]
+        health = subrecon.init_source_health("search")
+        hosts, findings = subrecon.collect_search_index_findings(ctx, health)
+        self.assertEqual(hosts, set())
+        self.assertEqual(findings, [])
+        self.assertEqual(health["status"], "error")
+        self.assertEqual(health["providers"]["bing"]["status"], "error")
+        self.assertEqual(
+            health.get("error_types", {}).get("bing_challenge_page"), 5
+        )
+
+    @patch("subrecon.fetch_url")
+    def test_collect_search_index_findings_commoncrawl_fallback_challenge_is_error(
+        self, mock_fetch_url
+    ) -> None:
+        def fake_fetch(
+            url: str,
+            timeout: int,
+            method: str = "GET",
+            headers: Optional[dict[str, str]] = None,
+            retries: int = 0,
+        ) -> tuple[int, str, dict[str, str]]:
+            del timeout, method, headers, retries
+            if "index.commoncrawl.org/collinfo.json" in url:
+                return (0, "", {})
+            if "www.bing.com/search" in url:
+                return (
+                    200,
+                    (
+                        "<html><body>One last step before you continue to Bing "
+                        "<div class='cf-turnstile'></div></body></html>"
+                    ),
+                    {},
+                )
+            return (0, "", {})
+
+        mock_fetch_url.side_effect = fake_fetch
+        ctx = self._default_context()
+        ctx.search_providers = ["commoncrawl"]
+        health = subrecon.init_source_health("search")
+        hosts, findings = subrecon.collect_search_index_findings(ctx, health)
+        self.assertEqual(hosts, set())
+        self.assertEqual(findings, [])
+        self.assertEqual(health["status"], "error")
+        self.assertEqual(health["providers"]["commoncrawl"]["status"], "error")
+        self.assertEqual(health["providers"]["bing"]["status"], "error")
+        self.assertEqual(
+            health.get("error_types", {}).get("commoncrawl_index_unavailable"), 1
+        )
+        self.assertEqual(
+            health.get("error_types", {}).get("bing_challenge_page"), 5
+        )
+
     @patch("subrecon.run_command")
     @patch("subrecon.check_tool")
     def test_collect_subfinder_subdomains_provenance_scoring(

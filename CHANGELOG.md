@@ -18,6 +18,7 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 - Pilot execution/launch decision template: `docs/PILOT_RUNBOOK.md`.
 - Pilot metrics capture template: `docs/PILOT_LOG_TEMPLATE.md`.
 - One-command local pilot test harness: `scripts/run_pilot_test.sh`.
+- Pilot execution record example: `docs/PILOT_LOG_2026-03-22.md`.
 
 ### Changed
 

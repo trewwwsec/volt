@@ -81,6 +81,7 @@ Quickstart: [docs/QUICKSTART.md](docs/QUICKSTART.md)
 Triage playbook: [docs/TRIAGE.md](docs/TRIAGE.md)
 Pilot runbook: [docs/PILOT_RUNBOOK.md](docs/PILOT_RUNBOOK.md)
 Pilot log template: [docs/PILOT_LOG_TEMPLATE.md](docs/PILOT_LOG_TEMPLATE.md)
+Latest pilot log sample: [docs/PILOT_LOG_2026-03-22.md](docs/PILOT_LOG_2026-03-22.md)
 Pilot test script: `scripts/run_pilot_test.sh`
 Testing: [docs/TESTING.md](docs/TESTING.md)
 Release process: [docs/RELEASE.md](docs/RELEASE.md)

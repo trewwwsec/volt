@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SEARCH_DIR="$SCRIPT_DIR"
+REPO_ROOT=""
+while [[ "$SEARCH_DIR" != "/" ]]; do
+  if [[ -f "$SEARCH_DIR/pyproject.toml" && -f "$SEARCH_DIR/subrecon.py" ]]; then
+    REPO_ROOT="$SEARCH_DIR"
+    break
+  fi
+  SEARCH_DIR="$(dirname "$SEARCH_DIR")"
+done
+if [[ -z "$REPO_ROOT" ]]; then
+  echo "[!] could not locate repository root from script path: $SCRIPT_DIR" >&2
+  exit 1
+fi
+cd "$REPO_ROOT"
+
 MODE="quick"
 OUT_DIR=""
 SKIP_GATES=0
@@ -63,6 +79,7 @@ export UV_CACHE_DIR="${UV_CACHE_DIR:-$OUT_DIR/.uv-cache}"
 echo "[*] pilot test output dir: $OUT_DIR"
 echo "[*] mode: $MODE"
 echo "[*] uv cache dir: $UV_CACHE_DIR"
+echo "[*] repo root: $REPO_ROOT"
 
 if [[ $SKIP_GATES -eq 0 ]]; then
   echo "[*] running deterministic quality gates..."

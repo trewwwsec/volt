@@ -103,7 +103,7 @@ def build_parser(
     parser.add_argument(
         "--search-providers",
         default="commoncrawl",
-        help="Comma-separated search providers (default: commoncrawl; optional: bing)",
+        help="Comma-separated search providers (default: commoncrawl)",
     )
     parser.add_argument(
         "--timeout", type=positive_int, default=10, help="HTTP timeout seconds"

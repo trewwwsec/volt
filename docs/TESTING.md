@@ -13,7 +13,7 @@ python -m compileall -q volt.py cli.py constants.py core.py models.py networking
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Current baseline: `115` tests passing.
+Current baseline: `112` tests passing.
 
 If `uv run` is unavailable in a local environment, use direct `python -m ...` commands for deterministic verification.
 
@@ -31,7 +31,7 @@ Current suite covers:
 
 - Domain parsing and normalization
 - Keyword parsing
-- Search provider parsing/validation (`bing`, `commoncrawl`)
+- Search provider parsing/validation (`commoncrawl`)
 - Finding deduplication and severity ordering
 - Subfinder/amass structured provenance parsing and confidence scoring
 - Amass compatibility fallback paths (`-src` -> no-`-src`, `-json` -> plain-output parsing)
@@ -39,6 +39,7 @@ Current suite covers:
 - Bing and Common Crawl search parsing paths and leak classification
 - Common Crawl index-failure fallback to Bing with degraded (`partial`) source-health semantics
 - Common Crawl endpoint selection and filter-compatibility fallback behavior (`filter==status:200` with retry fallback)
+- Common Crawl query-level `404` handling as no-result coverage, not provider error
 - CT JSON parsing path
 - CT fallback path (`crt.sh` -> Cert Spotter) with degraded (`partial`) source-health semantics
 - S3 `HEAD` + fallback `ListObjectsV2` classification path
@@ -170,7 +171,7 @@ Reference bundle: `/tmp/volt-pilot-20260322-231020` (full mode).
 
 - Core E2E (`core_e2e_iana.json`): `source_health.ct=ok`, `search=error`, `s3=ok_no_results`, `gcp=ok`, `azure=ok_no_results`, `takeover=ok_no_results`, `summary.total_findings=37`
 - CT-only (`ct_only_iana.json`): `source_health.ct=ok`, `summary.total_findings=21`
-- Search-only Common Crawl (`search_only_iana.json`): `source_health.search=error`, `error_types={bing_challenge_page:5, commoncrawl_index_unavailable:1}`, `summary.total_findings=0`
+- Search-only Common Crawl (`search_only_iana.json`): historical example of degraded Common Crawl availability before the Bing provider was removed from the product.
 - S3-only canary (`s3_only_canary.json`): `source_health.s3=ok`, `summary.total_findings=1`
 - GCS-only (`gcs_only_landsat.json`): `source_health.gcp=ok`, `summary.total_findings=2`
 - Takeover+CT (`takeover_ct_iana.json`): `ct=ok`, `takeover=ok_no_results`, `summary.total_findings=21`

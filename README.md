@@ -89,7 +89,7 @@ volt -d example.com --search-providers commoncrawl --no-ct --no-subfinder --no-a
 --version                Show installed volt version and exit
 --organization           Organization name for candidate generation
 --keywords               Comma-separated org or brand keywords
---search-providers       Search providers (default: commoncrawl; optional: bing)
+--search-providers       Search providers (default: commoncrawl)
 --timeout                HTTP timeout in seconds (default: 10)
 --tool-timeout           Timeout for subfinder/amass in seconds (default: 120)
 -t, --threads            Concurrent worker threads (default: 20)

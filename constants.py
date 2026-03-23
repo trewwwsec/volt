@@ -5,7 +5,7 @@ from typing import Any
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (compatible; volt-passive/1.0; +https://github.com/)"
 )
-SUPPORTED_SEARCH_PROVIDERS = {"bing", "commoncrawl"}
+SUPPORTED_SEARCH_PROVIDERS = {"commoncrawl"}
 TAKEOVER_REFERENCE_URL = "https://github.com/EdOverflow/can-i-take-over-xyz"
 AZURE_BLOB_REFERENCE_URL = (
     "https://techcommunity.microsoft.com/blog/azurepaasblog/"

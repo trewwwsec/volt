@@ -47,7 +47,7 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
   - Added Azure Blob CNAME-derived container listability checks.
   - Added lightweight HTTP retries/backoff for transient fetch failures.
   - Added amass compatibility fallback (`-src` and `-json`) with plain-output fallback.
-  - Added pluggable search providers (`bing`, `commoncrawl`).
+  - Added pluggable search provider support around Common Crawl.
   - Added passive subdomain takeover detection via CNAME + fingerprint matching.
   - Added curated takeover signatures with edge-case handling.
   - Tuned HTTP retry budgets by source class (CT/search/takeover) while keeping cloud probe retries at `0`.
@@ -71,7 +71,7 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
   - Ship an installable package with a `volt` CLI entry point.
   - Move from script-first usage to command-first usage.
 - Stabilize default operator experience:
-  - Default search provider to `commoncrawl`; keep `bing` opt-in.
+  - Default search provider to `commoncrawl`.
   - Continue surfacing source reliability clearly via `source_health`.
 - Add release/governance basics:
   - Introduce release notes/changelog and versioned release process.
@@ -99,7 +99,7 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
   - Add `--version` and version source-of-truth.
   - Deliverable: install docs validated on clean environment (`pipx` and `uv tool`).
 - Week 3: Safe defaults and operator UX
-  - Default search providers to `commoncrawl` and document `bing` as opt-in.
+  - Default search provider to `commoncrawl` and simplify search documentation.
   - Improve degraded-mode messaging and operator guidance in `source_health` notes.
   - Deliverable: updated defaults + docs + regression tests.
 - Week 4: Reliability hardening
@@ -134,7 +134,7 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
     - Acceptance: documented checklist used to cut a reproducible release candidate.
 
 - Milestone `M5-B` (Weeks 3-5): Reliability and Operator UX
-  - Issue: Default search provider configuration to `commoncrawl` and document `bing` opt-in.
+  - Issue: keep search reliability centered on `commoncrawl`.
     - Acceptance: CLI defaults changed, docs updated, and parser/provider tests pass.
   - Issue: Improve degraded-mode guidance in `source_health` and terminal output.
     - Acceptance: partial/error runs include actionable operator notes with deterministic formatting.

@@ -46,7 +46,7 @@ class CoreHelpersTest(unittest.TestCase):
             confidence="medium",
             title="Potential .env exposure indexed",
             description="",
-            source="bing",
+            source="commoncrawl",
         )
         two = volt.Finding(
             asset_type="indexed_leak",
@@ -55,7 +55,7 @@ class CoreHelpersTest(unittest.TestCase):
             confidence="medium",
             title="Potential sensitive file indexed",
             description="",
-            source="bing",
+            source="commoncrawl",
         )
         out = volt.dedupe_findings([one, two])
         self.assertEqual(len(out), 2)

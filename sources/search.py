@@ -1,76 +1,11 @@
 from __future__ import annotations
 
 import re
-from html import unescape
 from typing import Any, Callable
 from urllib import parse
 
 from core import record_source_error
 from models import Evidence, Finding, ScanContext
-
-
-def parse_bing_results(html: str) -> list[dict[str, str]]:
-    blocks = re.findall(r'<li class="b_algo".*?</li>', html, flags=re.S)
-    results: list[dict[str, str]] = []
-
-    for block in blocks:
-        href_match = re.search(r'<h2><a href="(https?://[^"]+)"', block)
-        if not href_match:
-            continue
-
-        title_match = re.search(r"<h2><a[^>]*>(.*?)</a></h2>", block, flags=re.S)
-        snippet_match = re.search(r"<p>(.*?)</p>", block, flags=re.S)
-
-        title = ""
-        snippet = ""
-        if title_match:
-            title = re.sub(r"<.*?>", "", title_match.group(1))
-        if snippet_match:
-            snippet = re.sub(r"<.*?>", "", snippet_match.group(1))
-
-        results.append(
-            {
-                "url": unescape(href_match.group(1)),
-                "title": unescape(title.strip()),
-                "snippet": unescape(snippet.strip()),
-            }
-        )
-
-    return results
-
-
-def is_bing_challenge_page(html: str) -> bool:
-    lower = html.lower()
-    has_challenge_token = any(
-        token in lower
-        for token in (
-            "cf-turnstile",
-            "captcha",
-            "challenge-platform",
-            "verifyendpoint",
-        )
-    )
-    has_human_prompt = any(
-        token in lower
-        for token in (
-            "one last step",
-            "verify you're human",
-            "verify you are human",
-            "before you continue to bing",
-        )
-    )
-    return has_challenge_token and has_human_prompt
-
-
-def build_dork_queries(domain: str) -> list[tuple[str, str]]:
-    return [
-        (f"site:{domain} ext:env", "dotenv"),
-        (f"site:{domain} ext:sql", "sql-dump"),
-        (f"site:{domain} (ext:bak OR ext:backup OR ext:old)", "backup-file"),
-        (f"site:{domain} inurl:.git/config", "git-config"),
-        (f"site:{domain} (ext:zip OR ext:tar OR ext:gz)", "archive"),
-    ]
-
 
 def build_commoncrawl_patterns(domain: str) -> list[tuple[str, str]]:
     return [
@@ -244,15 +179,11 @@ def collect_search_index_findings(
     context: ScanContext,
     stats: dict[str, Any],
     *,
-    build_dork_queries: Callable[[str], list[tuple[str, str]]],
     build_commoncrawl_patterns: Callable[[str], list[tuple[str, str]]],
     fetch_commoncrawl_index_endpoint: Callable[[int], str | None],
     fetch_commoncrawl_results: Callable[
         [str, str, int], tuple[int, list[dict[str, str]], str]
     ],
-    fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
-    is_bing_challenge_page: Callable[[str], bool],
-    parse_bing_results: Callable[[str], list[dict[str, str]]],
     classify_leak: Callable[[str, str], tuple[str, str, str, list[str]]],
     log: Callable[[str, bool, bool], None],
 ) -> tuple[set[str], list[Finding]]:
@@ -262,10 +193,8 @@ def collect_search_index_findings(
         provider: {"queries": 0, "errors": 0, "results": 0, "status": "ok", "notes": []}
         for provider in context.search_providers
     }
-    search_fallback_coverage = False
 
     commoncrawl_index = None
-    enable_bing_fallback = False
     if "commoncrawl" in context.search_providers:
         index_exception = False
         try:
@@ -291,127 +220,8 @@ def collect_search_index_findings(
                 else "commoncrawl_index_unavailable",
                 detail=index_note,
             )
-            if "bing" not in context.search_providers:
-                enable_bing_fallback = True
-                provider_stats.setdefault(
-                    "bing",
-                    {
-                        "queries": 0,
-                        "errors": 0,
-                        "results": 0,
-                        "status": "ok",
-                        "notes": [],
-                    },
-                )
-                fallback_note = (
-                    "fallback enabled: executing Bing dorks because "
-                    "Common Crawl index endpoint is unavailable"
-                )
-                provider_stats["bing"]["notes"].append(fallback_note)
-                stats["notes"].append(fallback_note)
-                log(
-                    "[search] provider=commoncrawl unavailable; using bing fallback",
-                    context.verbose,
-                )
 
     for domain in context.domains:
-        if "bing" in context.search_providers or enable_bing_fallback:
-            for query, category in build_dork_queries(domain):
-                provider_stats["bing"]["queries"] += 1
-                stats["queried"] += 1
-                url = (
-                    f"https://www.bing.com/search?q={parse.quote_plus(query)}&count=30"
-                )
-                status, body, _ = fetch_url(url, timeout=context.timeout)
-                if status != 200 or not body:
-                    provider_stats["bing"]["errors"] += 1
-                    provider_stats["bing"]["notes"].append(
-                        f"domain={domain} query={category} status={status}"
-                    )
-                    record_source_error(
-                        stats,
-                        f"bing_http_{status}",
-                        detail=f"domain={domain} query={category}",
-                    )
-                    log(
-                        f"[search] provider=bing {domain} query='{query}' failed status={status}",
-                        context.verbose,
-                    )
-                    continue
-
-                if is_bing_challenge_page(body):
-                    provider_stats["bing"]["errors"] += 1
-                    provider_stats["bing"]["notes"].append(
-                        f"domain={domain} query={category} challenge_page"
-                    )
-                    record_source_error(
-                        stats,
-                        "bing_challenge_page",
-                        detail=f"domain={domain} query={category}",
-                    )
-                    log(
-                        f"[search] provider=bing {domain} query='{query}' challenge page detected",
-                        context.verbose,
-                    )
-                    continue
-
-                try:
-                    results = parse_bing_results(body)
-                except Exception:
-                    provider_stats["bing"]["errors"] += 1
-                    provider_stats["bing"]["notes"].append(
-                        f"domain={domain} query={category} parse_error"
-                    )
-                    record_source_error(
-                        stats,
-                        "bing_parse_error",
-                        detail=f"domain={domain} query={category}",
-                    )
-                    log(
-                        f"[search] provider=bing {domain} query='{query}' parse error",
-                        context.verbose,
-                    )
-                    continue
-                provider_stats["bing"]["results"] += len(results)
-                search_fallback_coverage = True
-                log(
-                    f"[search] provider=bing {domain} query='{category}' results={len(results)}",
-                    context.verbose,
-                )
-
-                for item in results:
-                    target = item["url"]
-                    parsed = parse.urlparse(target)
-                    host = (parsed.hostname or "").lower()
-                    if not host:
-                        continue
-
-                    if not (host == domain or host.endswith(f".{domain}")):
-                        continue
-
-                    discovered_hosts.add(host)
-                    title, severity, description, tags = classify_leak(
-                        target, item.get("snippet", "")
-                    )
-                    findings.append(
-                        Finding(
-                            asset_type="indexed_leak",
-                            asset=target,
-                            severity=severity,
-                            confidence="medium",
-                            title=title,
-                            description=description,
-                            source="bing",
-                            tags=["passive", category, *tags],
-                            evidence=[
-                                Evidence(
-                                    source_url=url,
-                                    note=f"Search hit title: {item.get('title', '')[:120]}",
-                                )
-                            ],
-                        )
-                    )
-
         if "commoncrawl" in context.search_providers and commoncrawl_index:
             for pattern, category in build_commoncrawl_patterns(domain):
                 provider_stats["commoncrawl"]["queries"] += 1
@@ -433,6 +243,13 @@ def collect_search_index_findings(
                     log(
                         f"[search] provider=commoncrawl {domain} pattern='{pattern}' "
                         "exception during query",
+                        context.verbose,
+                    )
+                    continue
+                if status == 404:
+                    log(
+                        f"[search] provider=commoncrawl {domain} pattern='{pattern}' "
+                        "returned no results",
                         context.verbose,
                     )
                     continue
@@ -503,9 +320,7 @@ def collect_search_index_findings(
     stats["hosts"] = len(discovered_hosts)
     stats["findings"] = len(findings)
     if stats["errors"]:
-        stats["status"] = (
-            "partial" if (findings or search_fallback_coverage) else "error"
-        )
+        stats["status"] = "partial" if findings else "error"
     elif findings:
         stats["status"] = "ok"
     else:

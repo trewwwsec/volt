@@ -61,13 +61,10 @@ from networking import fetch_url as fetch_url_source
 from sources.ct import collect_ct_subdomains as collect_ct_subdomains_source
 from sources.search import (
     build_commoncrawl_patterns as build_commoncrawl_patterns_source,
-    build_dork_queries as build_dork_queries_source,
     classify_leak as classify_leak_source,
     collect_search_index_findings as collect_search_index_findings_source,
     fetch_commoncrawl_index_endpoint as fetch_commoncrawl_index_endpoint_source,
     fetch_commoncrawl_results as fetch_commoncrawl_results_source,
-    is_bing_challenge_page as is_bing_challenge_page_source,
-    parse_bing_results as parse_bing_results_source,
 )
 from sources.storage import (
     build_azure_container_wordlist as build_azure_container_wordlist_source,
@@ -381,10 +378,6 @@ def collect_ct_subdomains(
     )
 
 
-def build_dork_queries(domain: str) -> list[tuple[str, str]]:
-    return build_dork_queries_source(domain)
-
-
 def build_commoncrawl_patterns(domain: str) -> list[tuple[str, str]]:
     return build_commoncrawl_patterns_source(domain)
 
@@ -411,14 +404,6 @@ def fetch_commoncrawl_results(
     )
 
 
-def parse_bing_results(html: str) -> list[dict[str, str]]:
-    return parse_bing_results_source(html)
-
-
-def is_bing_challenge_page(html: str) -> bool:
-    return is_bing_challenge_page_source(html)
-
-
 def classify_leak(url: str, snippet: str) -> tuple[str, str, str, list[str]]:
     return classify_leak_source(url, snippet)
 
@@ -430,13 +415,9 @@ def collect_search_index_findings(
     return collect_search_index_findings_source(
         context,
         stats,
-        build_dork_queries=build_dork_queries,
         build_commoncrawl_patterns=build_commoncrawl_patterns,
         fetch_commoncrawl_index_endpoint=fetch_commoncrawl_index_endpoint,
         fetch_commoncrawl_results=fetch_commoncrawl_results,
-        fetch_url=fetch_url_search,
-        is_bing_challenge_page=is_bing_challenge_page,
-        parse_bing_results=parse_bing_results,
         classify_leak=classify_leak,
         log=log,
     )

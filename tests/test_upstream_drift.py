@@ -52,24 +52,6 @@ class UpstreamDriftReliabilityTest(unittest.TestCase):
         self.assertEqual(len(findings), 2)
         self.assertEqual(health["errors"], 0)
 
-    @patch("volt.parse_bing_results")
-    @patch("volt.fetch_url")
-    def test_collect_search_index_findings_handles_bing_parse_exceptions(
-        self, mock_fetch_url, mock_parse_bing
-    ) -> None:
-        mock_fetch_url.return_value = (200, "<html></html>", {})
-        mock_parse_bing.side_effect = ValueError("upstream markup drift")
-        health = volt.init_source_health("search")
-        hosts, findings = volt.collect_search_index_findings(
-            self._context(["bing"]), health
-        )
-        self.assertEqual(hosts, set())
-        self.assertEqual(findings, [])
-        self.assertEqual(health["status"], "error")
-        self.assertGreater(health.get("errors", 0), 0)
-        self.assertEqual(health["providers"]["bing"]["status"], "error")
-        self.assertGreater(health.get("error_types", {}).get("bing_parse_error", 0), 0)
-
     @patch("volt.fetch_commoncrawl_results")
     @patch("volt.fetch_commoncrawl_index_endpoint")
     def test_collect_search_index_findings_handles_commoncrawl_query_exceptions(

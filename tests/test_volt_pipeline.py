@@ -54,7 +54,7 @@ class VoltPipelineTest(unittest.TestCase):
             domains=["example.com"],
             organization=None,
             keywords=[],
-            search_providers=["bing", "commoncrawl"],
+            search_providers=["commoncrawl"],
             timeout=5,
             tool_timeout=30,
             threads=2,
@@ -121,24 +121,11 @@ class VoltPipelineTest(unittest.TestCase):
             ["commoncrawl"],
         )
         self.assertEqual(
-            volt.parse_search_providers("bing,commoncrawl,bing"),
-            ["bing", "commoncrawl"],
+            volt.parse_search_providers("commoncrawl,commoncrawl"),
+            ["commoncrawl"],
         )
         with self.assertRaises(ValueError):
-            volt.parse_search_providers("bing,unknown")
-
-    def test_parse_bing_results_extracts_url_title_snippet(self) -> None:
-        html = """
-        <li class="b_algo">
-          <h2><a href="https://a.example.com/.env">Env File</a></h2>
-          <p>dotenv leak indicator</p>
-        </li>
-        """
-        results = volt.parse_bing_results(html)
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["url"], "https://a.example.com/.env")
-        self.assertEqual(results[0]["title"], "Env File")
-        self.assertEqual(results[0]["snippet"], "dotenv leak indicator")
+            volt.parse_search_providers("invalid")
 
     def test_load_domains_supports_single_and_file_with_comments(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -195,7 +182,7 @@ class VoltPipelineTest(unittest.TestCase):
                     {"code": "a", "detail": "a"},
                 ],
                 "providers": {
-                    "bing": {
+                    "commoncrawl": {
                         "status": "partial",
                         "notes": ["n2", "n1", "n1"],
                     }
@@ -216,7 +203,7 @@ class VoltPipelineTest(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            source_health["search"]["providers"]["bing"]["notes"], ["n1", "n2"]
+            source_health["search"]["providers"]["commoncrawl"]["notes"], ["n1", "n2"]
         )
 
     def test_normalize_source_health_adds_operator_guidance_for_degraded_statuses(
@@ -405,15 +392,20 @@ class VoltPipelineTest(unittest.TestCase):
         retries = [call.kwargs.get("retries") for call in mock_fetch_url.call_args_list]
         self.assertTrue(all(value == volt.CT_HTTP_RETRIES for value in retries))
 
-    @patch("volt.fetch_url")
+    @patch("volt.fetch_commoncrawl_results")
+    @patch("volt.fetch_commoncrawl_index_endpoint")
     def test_collect_search_index_findings_filters_to_target_domain(
-        self, mock_fetch_url
+        self, mock_fetch_index, mock_fetch_results
     ) -> None:
-        html = """
-        <li class="b_algo"><h2><a href="https://a.example.com/.env">A</a></h2><p>dotenv</p></li>
-        <li class="b_algo"><h2><a href="https://evil.com/.env">E</a></h2><p>dotenv</p></li>
-        """
-        mock_fetch_url.return_value = (200, html, {})
+        mock_fetch_index.return_value = "https://index.commoncrawl.org/CC-MAIN-2026-10-index"
+        mock_fetch_results.return_value = (
+            200,
+            [
+                {"url": "https://a.example.com/.env", "title": "", "snippet": ""},
+                {"url": "https://evil.com/.env", "title": "", "snippet": ""},
+            ],
+            "https://index.commoncrawl.org/CC-MAIN-2026-10-index?url=test",
+        )
 
         ctx = self._default_context()
         hosts, findings = volt.collect_search_index_findings(ctx)
@@ -422,21 +414,19 @@ class VoltPipelineTest(unittest.TestCase):
         self.assertGreaterEqual(len(findings), 1)
         self.assertTrue(all("example.com" in f.asset for f in findings))
 
-    @patch("volt.fetch_url")
+    @patch("volt.fetch_commoncrawl_results")
+    @patch("volt.fetch_commoncrawl_index_endpoint")
     def test_collect_search_index_findings_commoncrawl_provider(
-        self, mock_fetch_url
+        self, mock_fetch_index, mock_fetch_results
     ) -> None:
-        mock_fetch_url.side_effect = [
-            # collinfo.json
+        mock_fetch_index.return_value = "https://index.commoncrawl.org/CC-MAIN-2026-10-index"
+        mock_fetch_results.side_effect = [
             (
                 200,
-                '[{"cdx-api":"https://index.commoncrawl.org/CC-MAIN-2026-10-index"}]',
-                {},
+                [{"url": "https://a.example.com/.env", "title": "", "snippet": ""}],
+                "https://index.commoncrawl.org/CC-MAIN-2026-10-index?url=dotenv",
             ),
-            # one commoncrawl query success
-            (200, '{"url":"https://a.example.com/.env"}\n', {}),
-            # remaining commoncrawl queries fail quickly
-            *[(500, "", {}) for _ in range(20)],
+            *[(500, [], "https://index.commoncrawl.org/CC-MAIN-2026-10-index?url=other") for _ in range(11)],
         ]
         ctx = self._default_context()
         ctx.search_providers = ["commoncrawl"]
@@ -472,120 +462,31 @@ class VoltPipelineTest(unittest.TestCase):
         self.assertIn("failed to resolve Common Crawl index endpoint", health["notes"])
         self.assertEqual(health["providers"]["commoncrawl"]["status"], "error")
 
-    @patch("volt.fetch_url")
-    def test_collect_search_index_findings_commoncrawl_index_failure_uses_bing_fallback(
-        self, mock_fetch_url
+    @patch("volt.fetch_commoncrawl_results")
+    @patch("volt.fetch_commoncrawl_index_endpoint")
+    def test_collect_search_index_findings_commoncrawl_404_is_not_error(
+        self, mock_fetch_index, mock_fetch_results
     ) -> None:
-        def fake_fetch(
-            url: str,
-            timeout: int,
-            method: str = "GET",
-            headers: Optional[dict[str, str]] = None,
-            retries: int = 0,
-        ) -> tuple[int, str, dict[str, str]]:
-            del timeout, method, headers, retries
-            if "index.commoncrawl.org/collinfo.json" in url:
-                return (0, "", {})
-            if "www.bing.com/search" in url:
-                return (
-                    200,
-                    '<li class="b_algo"><h2><a href="https://a.example.com/.env">A</a></h2><p>dotenv</p></li>',
-                    {},
-                )
-            return (0, "", {})
-
-        mock_fetch_url.side_effect = fake_fetch
-        ctx = self._default_context()
-        ctx.search_providers = ["commoncrawl"]
-        health = volt.init_source_health("search")
-        hosts, findings = volt.collect_search_index_findings(ctx, health)
-        self.assertIn("a.example.com", hosts)
-        self.assertTrue(any(f.source == "bing" for f in findings))
-        self.assertEqual(health["status"], "partial")
-        self.assertEqual(health["providers"]["commoncrawl"]["status"], "error")
-        self.assertEqual(health["providers"]["bing"]["status"], "ok")
-        self.assertTrue(
-            any(
-                "fallback enabled: executing Bing dorks" in note
-                for note in health["notes"]
-            )
-        )
-
-    @patch("volt.fetch_url")
-    def test_collect_search_index_findings_bing_no_results_sets_ok_no_results(
-        self, mock_fetch_url
-    ) -> None:
-        mock_fetch_url.return_value = (200, "<html><body>no hits</body></html>", {})
-        ctx = self._default_context()
-        ctx.search_providers = ["bing"]
-        health = volt.init_source_health("search")
-        hosts, findings = volt.collect_search_index_findings(ctx, health)
-        self.assertEqual(hosts, set())
-        self.assertEqual(findings, [])
-        self.assertEqual(health["status"], "ok_no_results")
-        self.assertEqual(health["providers"]["bing"]["status"], "ok_no_results")
-
-    @patch("volt.fetch_url")
-    def test_collect_search_index_findings_bing_challenge_marks_error(
-        self, mock_fetch_url
-    ) -> None:
-        mock_fetch_url.return_value = (
-            200,
+        mock_fetch_index.return_value = "https://index.commoncrawl.org/CC-MAIN-2026-10-index"
+        mock_fetch_results.side_effect = [
             (
-                "<html><body>One last step before you continue to Bing "
-                "<div class='cf-turnstile'></div></body></html>"
+                200,
+                [{"url": "https://a.example.com/.env", "title": "", "snippet": ""}],
+                "https://index.commoncrawl.org/CC-MAIN-2026-10-index?url=dotenv",
             ),
-            {},
-        )
-        ctx = self._default_context()
-        ctx.search_providers = ["bing"]
-        health = volt.init_source_health("search")
-        hosts, findings = volt.collect_search_index_findings(ctx, health)
-        self.assertEqual(hosts, set())
-        self.assertEqual(findings, [])
-        self.assertEqual(health["status"], "error")
-        self.assertEqual(health["providers"]["bing"]["status"], "error")
-        self.assertEqual(health.get("error_types", {}).get("bing_challenge_page"), 5)
-
-    @patch("volt.fetch_url")
-    def test_collect_search_index_findings_commoncrawl_fallback_challenge_is_error(
-        self, mock_fetch_url
-    ) -> None:
-        def fake_fetch(
-            url: str,
-            timeout: int,
-            method: str = "GET",
-            headers: Optional[dict[str, str]] = None,
-            retries: int = 0,
-        ) -> tuple[int, str, dict[str, str]]:
-            del timeout, method, headers, retries
-            if "index.commoncrawl.org/collinfo.json" in url:
-                return (0, "", {})
-            if "www.bing.com/search" in url:
-                return (
-                    200,
-                    (
-                        "<html><body>One last step before you continue to Bing "
-                        "<div class='cf-turnstile'></div></body></html>"
-                    ),
-                    {},
-                )
-            return (0, "", {})
-
-        mock_fetch_url.side_effect = fake_fetch
+            (404, [], "https://index.commoncrawl.org/CC-MAIN-2026-10-index?url=dotenv2"),
+            *[(200, [], "https://index.commoncrawl.org/CC-MAIN-2026-10-index?url=other") for _ in range(10)],
+        ]
         ctx = self._default_context()
         ctx.search_providers = ["commoncrawl"]
         health = volt.init_source_health("search")
         hosts, findings = volt.collect_search_index_findings(ctx, health)
-        self.assertEqual(hosts, set())
-        self.assertEqual(findings, [])
-        self.assertEqual(health["status"], "error")
-        self.assertEqual(health["providers"]["commoncrawl"]["status"], "error")
-        self.assertEqual(health["providers"]["bing"]["status"], "error")
-        self.assertEqual(
-            health.get("error_types", {}).get("commoncrawl_index_unavailable"), 1
-        )
-        self.assertEqual(health.get("error_types", {}).get("bing_challenge_page"), 5)
+        self.assertEqual(hosts, {"a.example.com"})
+        self.assertTrue(any(f.source == "commoncrawl" for f in findings))
+        self.assertEqual(health["status"], "ok")
+        self.assertEqual(health["errors"], 0)
+        self.assertEqual(health["providers"]["commoncrawl"]["status"], "ok")
+        self.assertNotIn("commoncrawl_http_404", health.get("error_types", {}))
 
     @patch("volt.run_command")
     @patch("volt.check_tool")
@@ -2144,9 +2045,9 @@ class VoltPipelineTest(unittest.TestCase):
         args = parser.parse_args(["-d", "example.com"])
         self.assertEqual(args.search_providers, "commoncrawl")
         args = parser.parse_args(
-            ["-d", "example.com", "--search-providers", "bing,commoncrawl"]
+            ["-d", "example.com", "--search-providers", "commoncrawl"]
         )
-        self.assertEqual(args.search_providers, "bing,commoncrawl")
+        self.assertEqual(args.search_providers, "commoncrawl")
 
     @patch("volt.collect_subdomain_takeover_findings")
     @patch("volt.collect_azure_blob_findings")
@@ -2196,7 +2097,7 @@ class VoltPipelineTest(unittest.TestCase):
             output="/tmp/ignored.json",
             organization=None,
             keywords=None,
-            search_providers="bing,commoncrawl",
+            search_providers="commoncrawl",
             timeout=5,
             tool_timeout=30,
             threads=2,
@@ -2234,7 +2135,7 @@ class VoltPipelineTest(unittest.TestCase):
             output="/tmp/ignored.json",
             organization=None,
             keywords=None,
-            search_providers="bing,invalid",
+            search_providers="invalid",
             timeout=5,
             tool_timeout=30,
             threads=2,

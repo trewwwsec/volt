@@ -3,16 +3,16 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "subrecon"
+name = "volt"
 dynamic = ["version"]
-description = "Passive perimeter intelligence scanner for domains and organizations."
+description = "Lightweight ASM CLI for passive perimeter intelligence."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
-subrecon = "subrecon:main"
+volt = "volt:main"
 
 [dependency-groups]
 dev = ["ruff>=0.11,<1.0"]
@@ -22,8 +22,8 @@ package = true
 
 [tool.setuptools]
 py-modules = [
-    "subrecon",
-    "subrecon_version",
+    "volt",
+    "volt_version",
     "cli",
     "constants",
     "core",
@@ -31,13 +31,13 @@ py-modules = [
     "networking",
     "parsing",
     "reporting",
-    "subrecon_models",
-    "subrecon_reporting",
+    "volt_models",
+    "volt_reporting",
 ]
 include-package-data = false
 
 [tool.setuptools.dynamic]
-version = { attr = "subrecon_version.__version__" }
+version = { attr = "volt_version.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["."]

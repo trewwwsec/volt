@@ -5,7 +5,7 @@ import argparse
 import json
 from typing import Any
 
-import subrecon
+from volt import check_single_bucket_exists
 
 DEFAULT_CANDIDATES = [
     "toolbox2",
@@ -87,7 +87,7 @@ def main() -> int:
     probes: list[dict[str, Any]] = []
     for bucket in candidates:
         _bucket, status, existence, region, list_status = (
-            subrecon.check_single_bucket_exists(
+            check_single_bucket_exists(
                 bucket,
                 args.timeout,
                 True,

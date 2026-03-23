@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SEARCH_DIR="$SCRIPT_DIR"
 REPO_ROOT=""
 while [[ "$SEARCH_DIR" != "/" ]]; do
-  if [[ -f "$SEARCH_DIR/pyproject.toml" && -f "$SEARCH_DIR/subrecon.py" ]]; then
+  if [[ -f "$SEARCH_DIR/pyproject.toml" && -f "$SEARCH_DIR/volt.py" ]]; then
     REPO_ROOT="$SEARCH_DIR"
     break
   fi
@@ -29,7 +29,7 @@ Usage: scripts/run_pilot_test.sh [options]
 
 Options:
   --mode quick|full      Matrix scope (default: quick)
-  --out-dir PATH         Output directory (default: /tmp/subrecon-pilot-<timestamp>)
+  --out-dir PATH         Output directory (default: /tmp/volt-pilot-<timestamp>)
   --skip-gates           Skip deterministic quality gates
   --skip-live            Skip live matrix execution
   -h, --help             Show this help
@@ -72,7 +72,7 @@ if [[ "$MODE" != "quick" && "$MODE" != "full" ]]; then
 fi
 
 if [[ -z "$OUT_DIR" ]]; then
-  OUT_DIR="/tmp/subrecon-pilot-$(date +%Y%m%d-%H%M%S)"
+  OUT_DIR="/tmp/volt-pilot-$(date +%Y%m%d-%H%M%S)"
 fi
 mkdir -p "$OUT_DIR"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$OUT_DIR/.uv-cache}"
@@ -88,8 +88,8 @@ if [[ $SKIP_GATES -eq 0 ]]; then
   uv run ruff check .
   uv run ruff format --check .
   uv run python -m compileall -q \
-    subrecon.py cli.py constants.py core.py models.py networking.py parsing.py \
-    reporting.py subrecon_models.py subrecon_reporting.py sources tests
+    volt.py cli.py constants.py core.py models.py networking.py parsing.py \
+    reporting.py volt_models.py volt_reporting.py sources tests
   uv run python -m unittest discover -s tests -p "test_*.py"
 else
   echo "[*] skipping deterministic quality gates"
@@ -100,11 +100,11 @@ echo "[*] collecting version metadata..."
   echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "git_commit=$(git rev-parse HEAD)"
   echo "uv_version=$(uv --version)"
-  subrecon_version="$(uv run subrecon --version 2>/dev/null || true)"
-  if [[ -z "$subrecon_version" ]]; then
-    subrecon_version="$(python3 -c 'import subrecon_version; print(subrecon_version.__version__)' 2>/dev/null || echo unavailable)"
+  volt_version="$(uv run volt --version 2>/dev/null || true)"
+  if [[ -z "$volt_version" ]]; then
+    volt_version="$(python3 -c 'import volt_version; print(volt_version.__version__)' 2>/dev/null || echo unavailable)"
   fi
-  echo "subrecon_version=$subrecon_version"
+  echo "volt_version=$volt_version"
 } > "$OUT_DIR/metadata.txt"
 
 if [[ $SKIP_LIVE -eq 1 ]]; then
@@ -133,7 +133,7 @@ run_case() {
 echo "[*] running bounded live matrix..."
 
 run_case core_e2e_iana \
-  uv run subrecon -d iana.org --no-subfinder --no-amass
+  uv run volt -d iana.org --no-subfinder --no-amass
 
 echo "[*] selecting S3 canary target..."
 S3_CANARY_JSON="$OUT_DIR/s3_canary_selection.json"
@@ -151,53 +151,53 @@ PY
     echo "[*] selected S3 canary bucket: $S3_CANARY_BUCKET"
     echo "$S3_CANARY_BUCKET" > "$OUT_DIR/s3_canary_bucket.txt"
     run_case s3_only_canary \
-      uv run subrecon -d "${S3_CANARY_BUCKET}.test" --keywords "$S3_CANARY_BUCKET" \
+      uv run volt -d "${S3_CANARY_BUCKET}.test" --keywords "$S3_CANARY_BUCKET" \
       --s3-website-probe \
       --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover
   else
     echo "[!] selector returned empty S3 canary bucket; using negative-control bucket case"
-    S3_NEGATIVE_BUCKET="subrecon-negative-s3-$(date +%s)"
+    S3_NEGATIVE_BUCKET="volt-negative-s3-$(date +%s)"
     echo "$S3_NEGATIVE_BUCKET" > "$OUT_DIR/s3_negative_bucket.txt"
     run_case s3_only_negative_control \
-      uv run subrecon -d "${S3_NEGATIVE_BUCKET}.test" --keywords "$S3_NEGATIVE_BUCKET" \
+      uv run volt -d "${S3_NEGATIVE_BUCKET}.test" --keywords "$S3_NEGATIVE_BUCKET" \
       --s3-website-probe \
       --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover
   fi
 else
   echo "[!] no viable S3 canary target resolved; using negative-control bucket case"
-  S3_NEGATIVE_BUCKET="subrecon-negative-s3-$(date +%s)"
+  S3_NEGATIVE_BUCKET="volt-negative-s3-$(date +%s)"
   echo "$S3_NEGATIVE_BUCKET" > "$OUT_DIR/s3_negative_bucket.txt"
   run_case s3_only_negative_control \
-    uv run subrecon -d "${S3_NEGATIVE_BUCKET}.test" --keywords "$S3_NEGATIVE_BUCKET" \
+    uv run volt -d "${S3_NEGATIVE_BUCKET}.test" --keywords "$S3_NEGATIVE_BUCKET" \
     --s3-website-probe \
     --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover
 fi
 
 run_case gcs_only_landsat \
-  uv run subrecon -d gcp-public-data.test --keywords gcp-public-data-landsat \
+  uv run volt -d gcp-public-data.test --keywords gcp-public-data-landsat \
   --no-ct --no-subfinder --no-amass --no-search --no-s3 --no-azure --no-takeover
 
 echo "[*] running Azure direct probes..."
-uv run python -c "import subrecon; print(subrecon.check_single_azure_blob_container('azureopendatastorage','nyctlc',10))" \
+uv run python -c "import volt; print(volt.check_single_azure_blob_container('azureopendatastorage','nyctlc',10))" \
   > "$OUT_DIR/azure_probe_default.txt" 2>&1 || true
-uv run python -c "import subrecon; print(subrecon.check_single_azure_blob_container('azureopendatastorage','nyctlc',10, azure_probe_retries=1))" \
+uv run python -c "import volt; print(volt.check_single_azure_blob_container('azureopendatastorage','nyctlc',10, azure_probe_retries=1))" \
   > "$OUT_DIR/azure_probe_retry1.txt" 2>&1 || true
 
 if [[ "$MODE" == "full" ]]; then
   run_case ct_only_iana \
-    uv run subrecon -d iana.org --no-search --no-s3 --no-gcp --no-azure --no-subfinder --no-amass --no-takeover
+    uv run volt -d iana.org --no-search --no-s3 --no-gcp --no-azure --no-subfinder --no-amass --no-takeover
 
   run_case search_only_iana \
-    uv run subrecon -d iana.org --search-providers commoncrawl --no-ct --no-subfinder --no-amass --no-s3 --no-gcp --no-azure --no-takeover
+    uv run volt -d iana.org --search-providers commoncrawl --no-ct --no-subfinder --no-amass --no-s3 --no-gcp --no-azure --no-takeover
 
   run_case takeover_ct_iana \
-    uv run subrecon -d iana.org --no-search --no-s3 --no-gcp --no-azure --no-subfinder --no-amass
+    uv run volt -d iana.org --no-search --no-s3 --no-gcp --no-azure --no-subfinder --no-amass
 
   run_case subfinder_only_iana \
-    uv run subrecon -d iana.org --no-ct --no-amass --no-search --no-s3 --no-gcp --no-azure --no-takeover
+    uv run volt -d iana.org --no-ct --no-amass --no-search --no-s3 --no-gcp --no-azure --no-takeover
 
   run_case amass_only_iana \
-    uv run subrecon -d iana.org --tool-timeout "$AMASS_TOOL_TIMEOUT" --no-ct --no-subfinder --no-search --no-s3 --no-gcp --no-azure --no-takeover
+    uv run volt -d iana.org --tool-timeout "$AMASS_TOOL_TIMEOUT" --no-ct --no-subfinder --no-search --no-s3 --no-gcp --no-azure --no-takeover
 fi
 
 echo "[*] building summary..."

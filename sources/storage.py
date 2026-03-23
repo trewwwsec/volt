@@ -470,7 +470,7 @@ def probe_s3_object_access(
     parse_s3_error_code: Callable[[dict[str, str], str], str],
     cloud_probe_http_retries: int,
 ) -> tuple[int, dict[str, str], str]:
-    probe_key = f"__subrecon_probe__{time_ns()}"
+    probe_key = f"__volt_probe__{time_ns()}"
     url = f"{build_s3_rest_endpoint(bucket, region)}/{probe_key}"
     status, body, headers = fetch_url(
         url, timeout=timeout, method="GET", retries=cloud_probe_http_retries
@@ -848,7 +848,7 @@ def probe_gcp_object_access(
     cloud_probe_http_retries: int,
 ) -> tuple[int, str]:
     retries = max(cloud_probe_http_retries, int(gcp_probe_retries))
-    probe_key = f"__subrecon_probe__{time_ns()}"
+    probe_key = f"__volt_probe__{time_ns()}"
     url = f"{build_gcp_xml_api_endpoint(bucket, virtual_hosted)}/{probe_key}"
     status, body, _ = fetch_url(url, timeout=timeout, method="GET", retries=retries)
     return status, parse_gcp_error_code(body)

@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Optional
 from unittest.mock import patch
 
-import subrecon
-from subrecon_models import Finding, ScanContext
+import volt
+from volt_models import Finding, ScanContext
 
 
 def mk_finding(
@@ -48,7 +48,7 @@ class DummyHTTPResponse:
         return False
 
 
-class SubreconPipelineTest(unittest.TestCase):
+class VoltPipelineTest(unittest.TestCase):
     def _default_context(self) -> ScanContext:
         return ScanContext(
             domains=["example.com"],
@@ -73,7 +73,7 @@ class SubreconPipelineTest(unittest.TestCase):
                 "",
             ]
         )
-        out = subrecon.parse_hosts_from_output(raw, "example.com")
+        out = volt.parse_hosts_from_output(raw, "example.com")
         self.assertEqual(out, {"a.example.com", "b.example.com", "example.com"})
 
     def test_parse_subfinder_structured_output_extracts_sources(self) -> None:
@@ -84,7 +84,7 @@ class SubreconPipelineTest(unittest.TestCase):
                 "not-json",
             ]
         )
-        parsed = subrecon.parse_subfinder_structured_output(raw, "example.com")
+        parsed = volt.parse_subfinder_structured_output(raw, "example.com")
         self.assertIn("a.example.com", parsed)
         self.assertEqual(parsed["a.example.com"], {"crtsh", "virustotal", "chaos"})
 
@@ -100,32 +100,32 @@ class SubreconPipelineTest(unittest.TestCase):
                 {"name": "evil.com", "source": "crtsh"},
             ]
         )
-        parsed = subrecon.parse_amass_structured_output(raw, "example.com")
+        parsed = volt.parse_amass_structured_output(raw, "example.com")
         self.assertIn("b.example.com", parsed)
         self.assertIn("crtsh", parsed["b.example.com"])
         self.assertIn("dnsdb", parsed["b.example.com"])
         self.assertIn("tag:cert", parsed["b.example.com"])
 
     def test_score_provenance_confidence(self) -> None:
-        self.assertEqual(subrecon.score_provenance_confidence(set()), "low")
-        self.assertEqual(subrecon.score_provenance_confidence({"crtsh"}), "medium")
+        self.assertEqual(volt.score_provenance_confidence(set()), "low")
+        self.assertEqual(volt.score_provenance_confidence({"crtsh"}), "medium")
         self.assertEqual(
-            subrecon.score_provenance_confidence({"crtsh", "dnsdb", "virustotal"}),
+            volt.score_provenance_confidence({"crtsh", "dnsdb", "virustotal"}),
             "high",
         )
-        self.assertEqual(subrecon.score_provenance_confidence({"tag:cert"}), "low")
+        self.assertEqual(volt.score_provenance_confidence({"tag:cert"}), "low")
 
     def test_parse_search_providers(self) -> None:
         self.assertEqual(
-            subrecon.parse_search_providers(None),
+            volt.parse_search_providers(None),
             ["commoncrawl"],
         )
         self.assertEqual(
-            subrecon.parse_search_providers("bing,commoncrawl,bing"),
+            volt.parse_search_providers("bing,commoncrawl,bing"),
             ["bing", "commoncrawl"],
         )
         with self.assertRaises(ValueError):
-            subrecon.parse_search_providers("bing,unknown")
+            volt.parse_search_providers("bing,unknown")
 
     def test_parse_bing_results_extracts_url_title_snippet(self) -> None:
         html = """
@@ -134,7 +134,7 @@ class SubreconPipelineTest(unittest.TestCase):
           <p>dotenv leak indicator</p>
         </li>
         """
-        results = subrecon.parse_bing_results(html)
+        results = volt.parse_bing_results(html)
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["url"], "https://a.example.com/.env")
         self.assertEqual(results[0]["title"], "Env File")
@@ -144,35 +144,35 @@ class SubreconPipelineTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "domains.txt"
             p.write_text("# comment\nExample.com\n\n.api.example.com\n")
-            domains = subrecon.load_domains("WWW.Example.com", str(p))
+            domains = volt.load_domains("WWW.Example.com", str(p))
         self.assertEqual(domains, ["api.example.com", "example.com", "www.example.com"])
 
     def test_load_domains_missing_file_raises_value_error(self) -> None:
         with self.assertRaises(ValueError):
-            subrecon.load_domains(None, "/tmp/does-not-exist-subrecon-domains.txt")
+            volt.load_domains(None, "/tmp/does-not-exist-volt-domains.txt")
 
     def test_positive_int(self) -> None:
-        self.assertEqual(subrecon.positive_int("12"), 12)
+        self.assertEqual(volt.positive_int("12"), 12)
         with self.assertRaises(argparse.ArgumentTypeError):
-            subrecon.positive_int("0")
+            volt.positive_int("0")
         with self.assertRaises(argparse.ArgumentTypeError):
-            subrecon.positive_int("-2")
+            volt.positive_int("-2")
         with self.assertRaises(argparse.ArgumentTypeError):
-            subrecon.positive_int("abc")
+            volt.positive_int("abc")
 
     def test_record_source_error_tracks_counts_and_samples(self) -> None:
-        health = subrecon.init_source_health("search")
-        subrecon.record_source_error(
+        health = volt.init_source_health("search")
+        volt.record_source_error(
             health,
             "commoncrawl_http_500",
             detail="domain=example.com query=dotenv",
         )
-        subrecon.record_source_error(
+        volt.record_source_error(
             health,
             "commoncrawl_http_500",
             detail="domain=example.com query=dotenv",
         )
-        subrecon.record_source_error(
+        volt.record_source_error(
             health,
             "subfinder_timeout",
             detail="domain=example.com timeout=30s",
@@ -202,7 +202,7 @@ class SubreconPipelineTest(unittest.TestCase):
                 },
             }
         }
-        subrecon.normalize_source_health(source_health)
+        volt.normalize_source_health(source_health)
         self.assertEqual(source_health["search"]["notes"], ["a-note", "z-note"])
         self.assertEqual(
             list(source_health["search"]["error_types"].keys()),
@@ -231,7 +231,7 @@ class SubreconPipelineTest(unittest.TestCase):
                 "notes": [],
             }
         }
-        subrecon.normalize_source_health(source_health)
+        volt.normalize_source_health(source_health)
         notes = source_health["ct"]["notes"]
         self.assertTrue(
             any(
@@ -253,41 +253,41 @@ class SubreconPipelineTest(unittest.TestCase):
         )
 
     def test_run_command_success_and_timeout(self) -> None:
-        rc, stdout, stderr = subrecon.run_command(
+        rc, stdout, stderr = volt.run_command(
             ["python3", "-c", "print('ok')"], timeout=2
         )
         self.assertEqual(rc, 0)
         self.assertEqual(stdout.strip(), "ok")
         self.assertEqual(stderr, "")
 
-        rc, _, _ = subrecon.run_command(
+        rc, _, _ = volt.run_command(
             ["python3", "-c", "import time; time.sleep(2)"],
             timeout=1,
         )
         self.assertEqual(rc, 124)
 
-    @patch("subrecon.sleep")
-    @patch("subrecon.request.urlopen")
+    @patch("volt.sleep")
+    @patch("volt.request.urlopen")
     def test_fetch_url_retries_on_urlerror_then_succeeds(
         self, mock_urlopen, mock_sleep
     ) -> None:
         mock_urlopen.side_effect = [
-            subrecon.error.URLError("temporary failure"),
+            volt.error.URLError("temporary failure"),
             DummyHTTPResponse(200, "ok", {"server": "test"}),
         ]
-        status, body, headers = subrecon.fetch_url("https://example.com", timeout=2)
+        status, body, headers = volt.fetch_url("https://example.com", timeout=2)
         self.assertEqual(status, 200)
         self.assertEqual(body, "ok")
         self.assertEqual(headers.get("server"), "test")
         self.assertEqual(mock_urlopen.call_count, 2)
         mock_sleep.assert_called_once()
 
-    @patch("subrecon.sleep")
-    @patch("subrecon.request.urlopen")
+    @patch("volt.sleep")
+    @patch("volt.request.urlopen")
     def test_fetch_url_retries_on_retryable_http_status_then_succeeds(
         self, mock_urlopen, mock_sleep
     ) -> None:
-        transient = subrecon.error.HTTPError(
+        transient = volt.error.HTTPError(
             "https://example.com",
             503,
             "Service Unavailable",
@@ -298,18 +298,18 @@ class SubreconPipelineTest(unittest.TestCase):
             transient,
             DummyHTTPResponse(200, "ok", {"server": "test"}),
         ]
-        status, body, _ = subrecon.fetch_url("https://example.com", timeout=2)
+        status, body, _ = volt.fetch_url("https://example.com", timeout=2)
         self.assertEqual(status, 200)
         self.assertEqual(body, "ok")
         self.assertEqual(mock_urlopen.call_count, 2)
         mock_sleep.assert_called_once()
 
-    @patch("subrecon.sleep")
-    @patch("subrecon.request.urlopen")
+    @patch("volt.sleep")
+    @patch("volt.request.urlopen")
     def test_fetch_url_does_not_retry_non_retryable_http_status(
         self, mock_urlopen, mock_sleep
     ) -> None:
-        not_found = subrecon.error.HTTPError(
+        not_found = volt.error.HTTPError(
             "https://example.com",
             404,
             "Not Found",
@@ -317,13 +317,13 @@ class SubreconPipelineTest(unittest.TestCase):
             io.BytesIO(b"missing"),
         )
         mock_urlopen.side_effect = [not_found]
-        status, body, _ = subrecon.fetch_url("https://example.com", timeout=2)
+        status, body, _ = volt.fetch_url("https://example.com", timeout=2)
         self.assertEqual(status, 404)
         self.assertEqual(body, "missing")
         self.assertEqual(mock_urlopen.call_count, 1)
         mock_sleep.assert_not_called()
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_collect_ct_subdomains_parses_rows(self, mock_fetch_url) -> None:
         payload = json.dumps(
             [
@@ -334,13 +334,13 @@ class SubreconPipelineTest(unittest.TestCase):
         mock_fetch_url.return_value = (200, payload, {})
 
         ctx = self._default_context()
-        hosts, findings = subrecon.collect_ct_subdomains(ctx)
+        hosts, findings = volt.collect_ct_subdomains(ctx)
         self.assertEqual(hosts, {"a.example.com", "b.example.com", "example.com"})
         self.assertEqual(len(findings), 3)
         first_call = mock_fetch_url.call_args_list[0]
-        self.assertEqual(first_call.kwargs.get("retries"), subrecon.CT_HTTP_RETRIES)
+        self.assertEqual(first_call.kwargs.get("retries"), volt.CT_HTTP_RETRIES)
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_collect_ct_subdomains_partial_when_some_domains_fail(
         self, mock_fetch_url
     ) -> None:
@@ -363,14 +363,14 @@ class SubreconPipelineTest(unittest.TestCase):
         mock_fetch_url.side_effect = fake_fetch
         ctx = self._default_context()
         ctx.domains = ["example.com", "example.org"]
-        health = subrecon.init_source_health("crt.sh")
-        hosts, findings = subrecon.collect_ct_subdomains(ctx, health)
+        health = volt.init_source_health("crt.sh")
+        hosts, findings = volt.collect_ct_subdomains(ctx, health)
         self.assertEqual(hosts, {"ok.example.com", "ok.example.org"})
         self.assertEqual(len(findings), 2)
         self.assertEqual(health["errors"], 1)
         self.assertEqual(health["status"], "partial")
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_collect_ct_subdomains_uses_certspotter_fallback_on_crt_failure(
         self, mock_fetch_url
     ) -> None:
@@ -395,17 +395,17 @@ class SubreconPipelineTest(unittest.TestCase):
         mock_fetch_url.side_effect = fake_fetch
         ctx = self._default_context()
         ctx.domains = ["example.com"]
-        health = subrecon.init_source_health("crt.sh")
-        hosts, findings = subrecon.collect_ct_subdomains(ctx, health)
+        health = volt.init_source_health("crt.sh")
+        hosts, findings = volt.collect_ct_subdomains(ctx, health)
         self.assertEqual(hosts, {"a.example.com", "b.example.com"})
         self.assertEqual(len(findings), 2)
         self.assertEqual(health["status"], "partial")
         self.assertEqual(health["errors"], 1)
         self.assertIn("crt.sh degraded; certspotter fallback used", health["notes"])
         retries = [call.kwargs.get("retries") for call in mock_fetch_url.call_args_list]
-        self.assertTrue(all(value == subrecon.CT_HTTP_RETRIES for value in retries))
+        self.assertTrue(all(value == volt.CT_HTTP_RETRIES for value in retries))
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_collect_search_index_findings_filters_to_target_domain(
         self, mock_fetch_url
     ) -> None:
@@ -416,13 +416,13 @@ class SubreconPipelineTest(unittest.TestCase):
         mock_fetch_url.return_value = (200, html, {})
 
         ctx = self._default_context()
-        hosts, findings = subrecon.collect_search_index_findings(ctx)
+        hosts, findings = volt.collect_search_index_findings(ctx)
         self.assertIn("a.example.com", hosts)
         self.assertNotIn("evil.com", hosts)
         self.assertGreaterEqual(len(findings), 1)
         self.assertTrue(all("example.com" in f.asset for f in findings))
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_collect_search_index_findings_commoncrawl_provider(
         self, mock_fetch_url
     ) -> None:
@@ -451,28 +451,28 @@ class SubreconPipelineTest(unittest.TestCase):
             "timeouts": 0,
             "notes": [],
         }
-        hosts, findings = subrecon.collect_search_index_findings(ctx, health)
+        hosts, findings = volt.collect_search_index_findings(ctx, health)
         self.assertIn("a.example.com", hosts)
         self.assertTrue(any(f.source == "commoncrawl" for f in findings))
         self.assertIn("providers", health)
         self.assertIn("commoncrawl", health["providers"])
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_collect_search_index_findings_commoncrawl_index_failure_sets_error(
         self, mock_fetch_url
     ) -> None:
         mock_fetch_url.return_value = (500, "", {})
         ctx = self._default_context()
         ctx.search_providers = ["commoncrawl"]
-        health = subrecon.init_source_health("search")
-        hosts, findings = subrecon.collect_search_index_findings(ctx, health)
+        health = volt.init_source_health("search")
+        hosts, findings = volt.collect_search_index_findings(ctx, health)
         self.assertEqual(hosts, set())
         self.assertEqual(findings, [])
         self.assertEqual(health["status"], "error")
         self.assertIn("failed to resolve Common Crawl index endpoint", health["notes"])
         self.assertEqual(health["providers"]["commoncrawl"]["status"], "error")
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_collect_search_index_findings_commoncrawl_index_failure_uses_bing_fallback(
         self, mock_fetch_url
     ) -> None:
@@ -497,8 +497,8 @@ class SubreconPipelineTest(unittest.TestCase):
         mock_fetch_url.side_effect = fake_fetch
         ctx = self._default_context()
         ctx.search_providers = ["commoncrawl"]
-        health = subrecon.init_source_health("search")
-        hosts, findings = subrecon.collect_search_index_findings(ctx, health)
+        health = volt.init_source_health("search")
+        hosts, findings = volt.collect_search_index_findings(ctx, health)
         self.assertIn("a.example.com", hosts)
         self.assertTrue(any(f.source == "bing" for f in findings))
         self.assertEqual(health["status"], "partial")
@@ -511,21 +511,21 @@ class SubreconPipelineTest(unittest.TestCase):
             )
         )
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_collect_search_index_findings_bing_no_results_sets_ok_no_results(
         self, mock_fetch_url
     ) -> None:
         mock_fetch_url.return_value = (200, "<html><body>no hits</body></html>", {})
         ctx = self._default_context()
         ctx.search_providers = ["bing"]
-        health = subrecon.init_source_health("search")
-        hosts, findings = subrecon.collect_search_index_findings(ctx, health)
+        health = volt.init_source_health("search")
+        hosts, findings = volt.collect_search_index_findings(ctx, health)
         self.assertEqual(hosts, set())
         self.assertEqual(findings, [])
         self.assertEqual(health["status"], "ok_no_results")
         self.assertEqual(health["providers"]["bing"]["status"], "ok_no_results")
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_collect_search_index_findings_bing_challenge_marks_error(
         self, mock_fetch_url
     ) -> None:
@@ -539,15 +539,15 @@ class SubreconPipelineTest(unittest.TestCase):
         )
         ctx = self._default_context()
         ctx.search_providers = ["bing"]
-        health = subrecon.init_source_health("search")
-        hosts, findings = subrecon.collect_search_index_findings(ctx, health)
+        health = volt.init_source_health("search")
+        hosts, findings = volt.collect_search_index_findings(ctx, health)
         self.assertEqual(hosts, set())
         self.assertEqual(findings, [])
         self.assertEqual(health["status"], "error")
         self.assertEqual(health["providers"]["bing"]["status"], "error")
         self.assertEqual(health.get("error_types", {}).get("bing_challenge_page"), 5)
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_collect_search_index_findings_commoncrawl_fallback_challenge_is_error(
         self, mock_fetch_url
     ) -> None:
@@ -575,8 +575,8 @@ class SubreconPipelineTest(unittest.TestCase):
         mock_fetch_url.side_effect = fake_fetch
         ctx = self._default_context()
         ctx.search_providers = ["commoncrawl"]
-        health = subrecon.init_source_health("search")
-        hosts, findings = subrecon.collect_search_index_findings(ctx, health)
+        health = volt.init_source_health("search")
+        hosts, findings = volt.collect_search_index_findings(ctx, health)
         self.assertEqual(hosts, set())
         self.assertEqual(findings, [])
         self.assertEqual(health["status"], "error")
@@ -587,8 +587,8 @@ class SubreconPipelineTest(unittest.TestCase):
         )
         self.assertEqual(health.get("error_types", {}).get("bing_challenge_page"), 5)
 
-    @patch("subrecon.run_command")
-    @patch("subrecon.check_tool")
+    @patch("volt.run_command")
+    @patch("volt.check_tool")
     def test_collect_subfinder_subdomains_provenance_scoring(
         self, mock_check_tool, mock_run_command
     ) -> None:
@@ -603,7 +603,7 @@ class SubreconPipelineTest(unittest.TestCase):
             ),
             "",
         )
-        hosts, findings = subrecon.collect_subfinder_subdomains(self._default_context())
+        hosts, findings = volt.collect_subfinder_subdomains(self._default_context())
         self.assertEqual(hosts, {"a.example.com", "b.example.com"})
         by_asset = {f.asset: f for f in findings}
         self.assertEqual(by_asset["a.example.com"].confidence, "high")
@@ -613,27 +613,30 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertIn("-oJ", cmd)
         self.assertIn("-cs", cmd)
 
-    @patch("subrecon.run_command")
-    @patch("subrecon.check_tool")
+    @patch("volt.run_command")
+    @patch("volt.check_tool")
     def test_collect_amass_subdomains_provenance_scoring(
         self, mock_check_tool, mock_run_command
     ) -> None:
         mock_check_tool.return_value = True
-        mock_run_command.return_value = (
-            0,
-            json.dumps(
-                [
-                    {
-                        "name": "a.example.com",
-                        "source": "crtsh",
-                        "sources": [{"name": "dnsdb"}],
-                    },
-                    {"name": "b.example.com", "tag": "cert"},
-                ]
+        mock_run_command.side_effect = [
+            (0, "amass v5.0.1", ""),
+            (
+                0,
+                json.dumps(
+                    [
+                        {
+                            "name": "a.example.com",
+                            "source": "crtsh",
+                            "sources": [{"name": "dnsdb"}],
+                        },
+                        {"name": "b.example.com", "tag": "cert"},
+                    ]
+                ),
+                "",
             ),
-            "",
-        )
-        hosts, findings = subrecon.collect_amass_subdomains(self._default_context())
+        ]
+        hosts, findings = volt.collect_amass_subdomains(self._default_context())
         self.assertEqual(hosts, {"a.example.com", "b.example.com"})
         by_asset = {f.asset: f for f in findings}
         self.assertEqual(by_asset["a.example.com"].confidence, "medium")
@@ -643,84 +646,92 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertIn("-json", cmd)
         self.assertEqual(mock_run_command.call_args.kwargs.get("timeout"), 90)
 
-    @patch("subrecon.run_command")
-    @patch("subrecon.check_tool")
+    @patch("volt.run_command")
+    @patch("volt.check_tool")
     @patch("builtins.print")
     def test_collect_amass_subdomains_retries_without_src_when_unsupported(
         self, _mock_print, mock_check_tool, mock_run_command
     ) -> None:
         mock_check_tool.return_value = True
         mock_run_command.side_effect = [
+            (0, "amass v5.0.1", ""),
             (1, "", "flag provided but not defined: -src"),
             (0, json.dumps([{"name": "a.example.com"}]), ""),
         ]
-        health = subrecon.init_source_health("amass")
-        hosts, findings = subrecon.collect_amass_subdomains(
+        health = volt.init_source_health("amass")
+        hosts, findings = volt.collect_amass_subdomains(
             self._default_context(), health
         )
         self.assertEqual(hosts, {"a.example.com"})
         self.assertEqual(len(findings), 1)
-        self.assertEqual(mock_run_command.call_count, 2)
-        first_cmd = mock_run_command.call_args_list[0][0][0]
-        second_cmd = mock_run_command.call_args_list[1][0][0]
+        self.assertEqual(mock_run_command.call_count, 3)
+        healthcheck_cmd = mock_run_command.call_args_list[0][0][0]
+        first_cmd = mock_run_command.call_args_list[1][0][0]
+        second_cmd = mock_run_command.call_args_list[2][0][0]
+        self.assertEqual(healthcheck_cmd, ["amass", "-version"])
         self.assertIn("-src", first_cmd)
         self.assertNotIn("-src", second_cmd)
         self.assertEqual(health.get("src_compat_fallbacks"), 1)
         self.assertTrue(any("-src unsupported" in note for note in health["notes"]))
 
-    @patch("subrecon.run_command")
-    @patch("subrecon.check_tool")
+    @patch("volt.run_command")
+    @patch("volt.check_tool")
     @patch("builtins.print")
     def test_collect_amass_subdomains_retries_plain_output_when_json_unsupported(
         self, _mock_print, mock_check_tool, mock_run_command
     ) -> None:
         mock_check_tool.return_value = True
         mock_run_command.side_effect = [
+            (0, "amass v5.0.1", ""),
             (1, "", "flag provided but not defined: -src"),
             (1, "", "flag provided but not defined: -json"),
             (0, "a.example.com\nevil.com\n", ""),
         ]
-        health = subrecon.init_source_health("amass")
-        hosts, findings = subrecon.collect_amass_subdomains(
+        health = volt.init_source_health("amass")
+        hosts, findings = volt.collect_amass_subdomains(
             self._default_context(), health
         )
         self.assertEqual(hosts, {"a.example.com"})
         self.assertEqual(len(findings), 1)
-        self.assertEqual(mock_run_command.call_count, 3)
-        first_cmd = mock_run_command.call_args_list[0][0][0]
-        second_cmd = mock_run_command.call_args_list[1][0][0]
-        third_cmd = mock_run_command.call_args_list[2][0][0]
+        self.assertEqual(mock_run_command.call_count, 4)
+        first_cmd = mock_run_command.call_args_list[1][0][0]
+        second_cmd = mock_run_command.call_args_list[2][0][0]
+        third_cmd = mock_run_command.call_args_list[3][0][0]
         self.assertIn("-src", first_cmd)
         self.assertIn("-json", second_cmd)
         self.assertNotIn("-src", third_cmd)
         self.assertNotIn("-json", third_cmd)
+        self.assertIn("-nocolor", third_cmd)
+        self.assertNotIn("-silent", third_cmd)
+        self.assertIn("-norecursive", third_cmd)
         self.assertEqual(health.get("src_compat_fallbacks"), 1)
         self.assertEqual(health.get("json_compat_fallbacks"), 1)
         self.assertTrue(any("-json unsupported" in note for note in health["notes"]))
 
-    @patch("subrecon.run_command")
-    @patch("subrecon.check_tool")
+    @patch("volt.run_command")
+    @patch("volt.check_tool")
     @patch("builtins.print")
     def test_collect_amass_subdomains_timeout_retry_marks_partial(
         self, _mock_print, mock_check_tool, mock_run_command
     ) -> None:
         mock_check_tool.return_value = True
         mock_run_command.side_effect = [
+            (0, "amass v5.0.1", ""),
             (1, "", "flag provided but not defined: -src"),
             (1, "", "flag provided but not defined: -json"),
             (124, "", ""),
             (124, "", ""),
         ]
-        health = subrecon.init_source_health("amass")
-        hosts, findings = subrecon.collect_amass_subdomains(
+        health = volt.init_source_health("amass")
+        hosts, findings = volt.collect_amass_subdomains(
             self._default_context(), health
         )
         self.assertEqual(hosts, set())
         self.assertEqual(findings, [])
-        self.assertEqual(mock_run_command.call_count, 4)
+        self.assertEqual(mock_run_command.call_count, 5)
         fallback_cmd = mock_run_command.call_args_list[-1][0][0]
         self.assertIn("-nocolor", fallback_cmd)
-        self.assertIn("-silent", fallback_cmd)
+        self.assertNotIn("-silent", fallback_cmd)
         self.assertIn("-norecursive", fallback_cmd)
         self.assertEqual(health.get("timeouts"), 1)
         self.assertEqual(health.get("errors"), 0)
@@ -729,29 +740,110 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(health.get("timeout_exhausted_domains"), 1)
         self.assertEqual(health.get("error_types", {}).get("amass_timeout"), 1)
 
-    @patch("subrecon.run_command")
-    @patch("subrecon.check_tool")
+    @patch("volt.run_command")
+    @patch("volt.check_tool")
     @patch("builtins.print")
     def test_collect_amass_subdomains_ok_no_results_after_empty_completion(
         self, _mock_print, mock_check_tool, mock_run_command
     ) -> None:
         mock_check_tool.return_value = True
         mock_run_command.side_effect = [
+            (0, "amass v5.0.1", ""),
             (1, "", "flag provided but not defined: -src"),
             (1, "", "flag provided but not defined: -json"),
             (0, "", ""),
         ]
-        health = subrecon.init_source_health("amass")
-        hosts, findings = subrecon.collect_amass_subdomains(
+        health = volt.init_source_health("amass")
+        hosts, findings = volt.collect_amass_subdomains(
             self._default_context(), health
         )
         self.assertEqual(hosts, set())
         self.assertEqual(findings, [])
         self.assertEqual(health.get("timeouts"), 0)
         self.assertEqual(health.get("errors"), 0)
-        self.assertEqual(health.get("status"), "ok_no_results")
+        self.assertEqual(health.get("status"), "partial")
+        self.assertEqual(health.get("compat_empty_output_domains"), 1)
+        self.assertTrue(
+            any(
+                "compatibility mode produced no plain output" in note
+                for note in health["notes"]
+            )
+        )
 
-    @patch("subrecon.check_single_bucket_exists")
+    @patch("volt.run_command")
+    @patch("volt.check_tool")
+    @patch("builtins.print")
+    def test_collect_amass_subdomains_marks_error_when_tool_unhealthy(
+        self, _mock_print, mock_check_tool, mock_run_command
+    ) -> None:
+        mock_check_tool.return_value = True
+        mock_run_command.side_effect = [
+            (1, "", ""),
+            (1, "", ""),
+        ]
+        health = volt.init_source_health("amass")
+        hosts, findings = volt.collect_amass_subdomains(
+            self._default_context(), health
+        )
+        self.assertEqual(hosts, set())
+        self.assertEqual(findings, [])
+        self.assertEqual(health.get("queried"), 0)
+        self.assertEqual(health.get("errors"), 1)
+        self.assertEqual(health.get("timeouts"), 0)
+        self.assertEqual(health.get("status"), "error")
+        self.assertEqual(
+            health.get("error_types", {}).get("amass_tool_unhealthy"),
+            1,
+        )
+        self.assertTrue(
+            any("installed but unresponsive" in note for note in health["notes"])
+        )
+        self.assertEqual(
+            mock_run_command.call_args_list[0][0][0],
+            ["amass", "-version"],
+        )
+        self.assertEqual(
+            mock_run_command.call_args_list[1][0][0],
+            ["amass", "enum", "-h"],
+        )
+
+    @patch("volt.run_command")
+    @patch("volt.check_tool")
+    @patch("builtins.print")
+    def test_collect_amass_subdomains_health_probe_timeout_is_inconclusive(
+        self, _mock_print, mock_check_tool, mock_run_command
+    ) -> None:
+        mock_check_tool.return_value = True
+        mock_run_command.side_effect = [
+            (124, "", ""),
+            (124, "", ""),
+            (1, "", "flag provided but not defined: -src"),
+            (1, "", "flag provided but not defined: -json"),
+            (0, "a.example.com\n", ""),
+        ]
+        health = volt.init_source_health("amass")
+        hosts, findings = volt.collect_amass_subdomains(
+            self._default_context(), health
+        )
+        self.assertEqual(hosts, {"a.example.com"})
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(health.get("status"), "ok")
+        self.assertEqual(health.get("errors"), 0)
+        self.assertEqual(
+            health.get("error_types", {}).get("amass_tool_unhealthy"),
+            None,
+        )
+        self.assertEqual(
+            mock_run_command.call_args_list[0][0][0],
+            ["amass", "-version"],
+        )
+        self.assertEqual(
+            mock_run_command.call_args_list[1][0][0],
+            ["amass", "enum", "-h"],
+        )
+        self.assertIn("-src", mock_run_command.call_args_list[2][0][0])
+
+    @patch("volt.check_single_bucket_exists")
     def test_collect_s3_bucket_findings_classifies_200_as_medium(
         self, mock_bucket_check
     ) -> None:
@@ -772,7 +864,7 @@ class SubreconPipelineTest(unittest.TestCase):
 
         ctx = self._default_context()
         ctx.keywords = ["mybucket"]
-        findings = subrecon.collect_s3_bucket_findings(ctx, hosts=set())
+        findings = volt.collect_s3_bucket_findings(ctx, hosts=set())
         by_asset = {f.asset: f for f in findings}
         self.assertIn("mybucket", by_asset)
         self.assertEqual(by_asset["mybucket"].severity, "medium")
@@ -784,134 +876,134 @@ class SubreconPipelineTest(unittest.TestCase):
 
     def test_classify_s3_head_status(self) -> None:
         self.assertEqual(
-            subrecon.classify_s3_head_status(200, "us-east-1"), "confirmed_exists"
+            volt.classify_s3_head_status(200, "us-east-1"), "confirmed_exists"
         )
         self.assertEqual(
-            subrecon.classify_s3_head_status(403, "us-east-1"), "likely_exists"
+            volt.classify_s3_head_status(403, "us-east-1"), "likely_exists"
         )
-        self.assertEqual(subrecon.classify_s3_head_status(403, ""), "unknown")
-        self.assertEqual(subrecon.classify_s3_head_status(404, ""), "unknown")
+        self.assertEqual(volt.classify_s3_head_status(403, ""), "unknown")
+        self.assertEqual(volt.classify_s3_head_status(404, ""), "unknown")
 
     def test_classify_gcp_status(self) -> None:
-        self.assertEqual(subrecon.classify_gcp_status(200), "confirmed_exists")
-        self.assertEqual(subrecon.classify_gcp_status(403), "likely_exists")
-        self.assertEqual(subrecon.classify_gcp_status(404), "unknown")
+        self.assertEqual(volt.classify_gcp_status(200), "confirmed_exists")
+        self.assertEqual(volt.classify_gcp_status(403), "likely_exists")
+        self.assertEqual(volt.classify_gcp_status(404), "unknown")
         self.assertEqual(
-            subrecon.classify_gcp_status(404, "NoSuchBucket"), "not_exists"
+            volt.classify_gcp_status(404, "NoSuchBucket"), "not_exists"
         )
 
     def test_classify_azure_blob_status(self) -> None:
         self.assertEqual(
-            subrecon.classify_azure_blob_status(200, ""),
+            volt.classify_azure_blob_status(200, ""),
             "confirmed_public",
         )
         self.assertEqual(
-            subrecon.classify_azure_blob_status(403, "AuthorizationFailure"),
+            volt.classify_azure_blob_status(403, "AuthorizationFailure"),
             "likely_exists",
         )
         self.assertEqual(
-            subrecon.classify_azure_blob_status(404, "ContainerNotFound"),
+            volt.classify_azure_blob_status(404, "ContainerNotFound"),
             "not_exists",
         )
         self.assertEqual(
-            subrecon.classify_azure_blob_status(401, "NoAuthenticationInformation"),
+            volt.classify_azure_blob_status(401, "NoAuthenticationInformation"),
             "likely_exists",
         )
         self.assertEqual(
-            subrecon.classify_azure_blob_status(403, "SomeUnknownCode"),
+            volt.classify_azure_blob_status(403, "SomeUnknownCode"),
             "unknown",
         )
 
     def test_is_valid_azure_container_name_accepts_system_containers(self) -> None:
-        self.assertTrue(subrecon.is_valid_azure_container_name("$web"))
-        self.assertTrue(subrecon.is_valid_azure_container_name("$root"))
-        self.assertTrue(subrecon.is_valid_azure_container_name("$logs"))
+        self.assertTrue(volt.is_valid_azure_container_name("$web"))
+        self.assertTrue(volt.is_valid_azure_container_name("$root"))
+        self.assertTrue(volt.is_valid_azure_container_name("$logs"))
 
     def test_parse_azure_error_code_prefers_header(self) -> None:
-        code = subrecon.parse_azure_error_code(
+        code = volt.parse_azure_error_code(
             {"x-ms-error-code": "AuthorizationFailure"},
             "<Error><Code>FeatureVersionMismatch</Code></Error>",
         )
         self.assertEqual(code, "AuthorizationFailure")
 
     def test_parse_azure_error_code_falls_back_to_body(self) -> None:
-        code = subrecon.parse_azure_error_code(
+        code = volt.parse_azure_error_code(
             {},
             "<Error><Code>FeatureVersionMismatch</Code></Error>",
         )
         self.assertEqual(code, "FeatureVersionMismatch")
 
     def test_parse_s3_error_code_prefers_header(self) -> None:
-        code = subrecon.parse_s3_error_code(
+        code = volt.parse_s3_error_code(
             {"x-amz-error-code": "NoSuchBucket"},
             "<Error><Code>AccessDenied</Code></Error>",
         )
         self.assertEqual(code, "NoSuchBucket")
 
     def test_parse_s3_error_code_falls_back_to_body(self) -> None:
-        code = subrecon.parse_s3_error_code(
+        code = volt.parse_s3_error_code(
             {},
             "<Error><Code>NoSuchKey</Code></Error>",
         )
         self.assertEqual(code, "NoSuchKey")
 
     def test_parse_gcp_error_code_falls_back_to_body(self) -> None:
-        code = subrecon.parse_gcp_error_code("<Error><Code>NoSuchBucket</Code></Error>")
+        code = volt.parse_gcp_error_code("<Error><Code>NoSuchBucket</Code></Error>")
         self.assertEqual(code, "NoSuchBucket")
 
     def test_extract_azure_storage_account_from_cname_supports_extended_suffixes(
         self,
     ) -> None:
         self.assertEqual(
-            subrecon.extract_azure_storage_account_from_cname(
+            volt.extract_azure_storage_account_from_cname(
                 "acmestorage.blob.core.usgovcloudapi.net"
             ),
             "acmestorage",
         )
         self.assertEqual(
-            subrecon.extract_azure_storage_account_from_cname(
+            volt.extract_azure_storage_account_from_cname(
                 "acmestorage.z05.blob.storage.azure.net"
             ),
             "acmestorage",
         )
         self.assertEqual(
-            subrecon.extract_azure_storage_account_from_cname(
+            volt.extract_azure_storage_account_from_cname(
                 "asverify.acmestorage.web.core.windows.net"
             ),
             "acmestorage",
         )
 
     def test_validate_s3_bucket_name_filters_reserved_and_invalid(self) -> None:
-        self.assertEqual(subrecon.validate_s3_bucket_name("valid-bucket"), (True, ""))
+        self.assertEqual(volt.validate_s3_bucket_name("valid-bucket"), (True, ""))
         self.assertEqual(
-            subrecon.validate_s3_bucket_name("xn--bucket"),
+            volt.validate_s3_bucket_name("xn--bucket"),
             (False, "reserved_prefix"),
         )
         self.assertEqual(
-            subrecon.validate_s3_bucket_name("example-s3alias"),
+            volt.validate_s3_bucket_name("example-s3alias"),
             (False, "reserved_suffix"),
         )
         self.assertEqual(
-            subrecon.validate_s3_bucket_name("192.168.0.1"),
+            volt.validate_s3_bucket_name("192.168.0.1"),
             (False, "ip_address_style"),
         )
 
     def test_validate_gcp_bucket_name_filters_reserved_and_invalid(self) -> None:
-        self.assertEqual(subrecon.validate_gcp_bucket_name("valid-bucket"), (True, ""))
+        self.assertEqual(volt.validate_gcp_bucket_name("valid-bucket"), (True, ""))
         self.assertEqual(
-            subrecon.validate_gcp_bucket_name("assets.example.com"),
+            volt.validate_gcp_bucket_name("assets.example.com"),
             (True, ""),
         )
         self.assertEqual(
-            subrecon.validate_gcp_bucket_name("goog-bucket"),
+            volt.validate_gcp_bucket_name("goog-bucket"),
             (False, "reserved_prefix"),
         )
         self.assertEqual(
-            subrecon.validate_gcp_bucket_name("my-g00gle-bucket"),
+            volt.validate_gcp_bucket_name("my-g00gle-bucket"),
             (False, "reserved_substring"),
         )
         self.assertEqual(
-            subrecon.validate_gcp_bucket_name("192.168.0.1"),
+            volt.validate_gcp_bucket_name("192.168.0.1"),
             (False, "ip_address_style"),
         )
 
@@ -919,7 +1011,7 @@ class SubreconPipelineTest(unittest.TestCase):
         ctx = self._default_context()
         ctx.keywords = ["portal"]
         ctx.max_bucket_candidates = 200
-        candidates = subrecon.build_gcp_bucket_wordlist(
+        candidates = volt.build_gcp_bucket_wordlist(
             ctx, {"assets.example.com", "api.dev.example.com"}
         )
         self.assertIn("example.com", candidates)
@@ -928,26 +1020,26 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertIn("portal.example.com", candidates)
 
     @patch("builtins.print")
-    @patch("subrecon.check_single_bucket_exists")
+    @patch("volt.check_single_bucket_exists")
     def test_collect_s3_bucket_findings_skips_unknown_signals(
         self, mock_bucket_check, _mock_print
     ) -> None:
         mock_bucket_check.return_value = ("example", 404, "unknown", "", None)
         ctx = self._default_context()
-        findings = subrecon.collect_s3_bucket_findings(ctx, hosts={"a.example.com"})
+        findings = volt.collect_s3_bucket_findings(ctx, hosts={"a.example.com"})
         self.assertEqual(findings, [])
 
     def test_collect_s3_bucket_findings_filters_invalid_candidates(self) -> None:
         ctx = self._default_context()
         ctx.keywords = ["192.168.0.1"]
-        health = subrecon.init_source_health("s3")
-        subrecon.collect_s3_bucket_findings(ctx, hosts=set(), health=health)
+        health = volt.init_source_health("s3")
+        volt.collect_s3_bucket_findings(ctx, hosts=set(), health=health)
         self.assertGreater(health.get("filtered_invalid_candidates", 0), 0)
         self.assertGreater(
             health.get("filtered_reasons", {}).get("ip_address_style", 0), 0
         )
 
-    @patch("subrecon.check_single_gcp_bucket_exists")
+    @patch("volt.check_single_gcp_bucket_exists")
     def test_collect_gcp_bucket_findings_classifies_200_as_medium(
         self, mock_gcp_check
     ) -> None:
@@ -967,7 +1059,7 @@ class SubreconPipelineTest(unittest.TestCase):
         ctx = self._default_context()
         ctx.keywords = ["mybucket"]
         ctx.max_bucket_candidates = 200
-        findings = subrecon.collect_gcp_bucket_findings(ctx, hosts=set())
+        findings = volt.collect_gcp_bucket_findings(ctx, hosts=set())
         by_asset = {f.asset: f for f in findings}
         self.assertIn("mybucket", by_asset)
         self.assertEqual(by_asset["mybucket"].severity, "medium")
@@ -982,8 +1074,8 @@ class SubreconPipelineTest(unittest.TestCase):
         ctx.domains = []
         ctx.organization = ""
         ctx.keywords = ["goog-sensitive"]
-        health = subrecon.init_source_health("gcp")
-        findings = subrecon.collect_gcp_bucket_findings(ctx, hosts=set(), health=health)
+        health = volt.init_source_health("gcp")
+        findings = volt.collect_gcp_bucket_findings(ctx, hosts=set(), health=health)
         self.assertEqual(findings, [])
         self.assertEqual(health.get("status"), "ok_no_candidates")
         self.assertGreater(health.get("raw_candidates", 0), 0)
@@ -992,7 +1084,7 @@ class SubreconPipelineTest(unittest.TestCase):
             health.get("filtered_reasons", {}).get("reserved_prefix", 0), 0
         )
 
-    @patch("subrecon.check_single_gcp_bucket_exists")
+    @patch("volt.check_single_gcp_bucket_exists")
     def test_collect_gcp_bucket_findings_suppresses_weak_likely_generic_name(
         self, mock_gcp_check
     ) -> None:
@@ -1010,14 +1102,14 @@ class SubreconPipelineTest(unittest.TestCase):
         ctx = self._default_context()
         ctx.keywords = []
         ctx.max_bucket_candidates = 200
-        health = subrecon.init_source_health("gcp")
-        findings = subrecon.collect_gcp_bucket_findings(
+        health = volt.init_source_health("gcp")
+        findings = volt.collect_gcp_bucket_findings(
             ctx, hosts={"backup.example.com"}, health=health
         )
         self.assertEqual(findings, [])
         self.assertGreater(health.get("suppressed_weak_likely", 0), 0)
 
-    @patch("subrecon.check_single_gcp_bucket_exists")
+    @patch("volt.check_single_gcp_bucket_exists")
     def test_collect_gcp_bucket_findings_keeps_likely_with_target_affinity(
         self, mock_gcp_check
     ) -> None:
@@ -1037,10 +1129,10 @@ class SubreconPipelineTest(unittest.TestCase):
         ctx.organization = ""
         ctx.keywords = ["acme", "backup"]
         ctx.max_bucket_candidates = 200
-        findings = subrecon.collect_gcp_bucket_findings(ctx, hosts=set())
+        findings = volt.collect_gcp_bucket_findings(ctx, hosts=set())
         self.assertTrue(any(f.asset == "backup" for f in findings))
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_check_single_gcp_bucket_exists_uses_nosuchbucket_signal(
         self, mock_fetch_url
     ) -> None:
@@ -1048,7 +1140,7 @@ class SubreconPipelineTest(unittest.TestCase):
             (404, "", {}),
             (404, "<Error><Code>NoSuchBucket</Code></Error>", {}),
         ]
-        _, status, existence, list_status = subrecon.check_single_gcp_bucket_exists(
+        _, status, existence, list_status = volt.check_single_gcp_bucket_exists(
             "definitely-not-real-gcs-bucket-xyz987",
             5,
         )
@@ -1057,7 +1149,7 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(list_status, 404)
         self.assertEqual(mock_fetch_url.call_count, 2)
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_check_single_gcp_bucket_exists_uses_object_probe_for_nosuchkey(
         self, mock_fetch_url
     ) -> None:
@@ -1066,7 +1158,7 @@ class SubreconPipelineTest(unittest.TestCase):
             (404, "<Error><Code>NotFound</Code></Error>", {}),
             (404, "<Error><Code>NoSuchKey</Code></Error>", {}),
         ]
-        _, status, existence, list_status = subrecon.check_single_gcp_bucket_exists(
+        _, status, existence, list_status = volt.check_single_gcp_bucket_exists(
             "gcp-public-data-landsat",
             5,
         )
@@ -1075,11 +1167,11 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(list_status, 404)
         self.assertEqual(mock_fetch_url.call_count, 3)
         self.assertIn(
-            "gcp-public-data-landsat/__subrecon_probe__",
+            "gcp-public-data-landsat/__volt_probe__",
             mock_fetch_url.call_args_list[2].args[0],
         )
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_check_single_gcp_bucket_exists_uses_dual_endpoint_fallback(
         self, mock_fetch_url
     ) -> None:
@@ -1089,7 +1181,7 @@ class SubreconPipelineTest(unittest.TestCase):
             (404, "<Error><Code>NotFound</Code></Error>", {}),
             (403, "", {}),
         ]
-        _, status, existence, list_status = subrecon.check_single_gcp_bucket_exists(
+        _, status, existence, list_status = volt.check_single_gcp_bucket_exists(
             "examplebucket",
             5,
             gcp_dual_endpoint_probe=True,
@@ -1103,7 +1195,7 @@ class SubreconPipelineTest(unittest.TestCase):
             mock_fetch_url.call_args_list[3].args[0],
         )
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_check_single_gcp_bucket_exists_respects_gcp_probe_retry_override(
         self, mock_fetch_url
     ) -> None:
@@ -1111,7 +1203,7 @@ class SubreconPipelineTest(unittest.TestCase):
             (404, "", {}),
             (404, "<Error><Code>NoSuchBucket</Code></Error>", {}),
         ]
-        subrecon.check_single_gcp_bucket_exists(
+        volt.check_single_gcp_bucket_exists(
             "retry-test-gcs-bucket",
             5,
             gcp_probe_retries=1,
@@ -1119,7 +1211,7 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(mock_fetch_url.call_args_list[0].kwargs.get("retries"), 1)
 
     @patch("builtins.print")
-    @patch("subrecon.check_single_bucket_exists")
+    @patch("volt.check_single_bucket_exists")
     def test_collect_s3_bucket_findings_suppresses_weak_likely_probe403(
         self, mock_bucket_check, _mock_print
     ) -> None:
@@ -1131,26 +1223,48 @@ class SubreconPipelineTest(unittest.TestCase):
             403,
         )
         ctx = self._default_context()
-        findings = subrecon.collect_s3_bucket_findings(ctx, hosts={"a.example.com"})
+        findings = volt.collect_s3_bucket_findings(ctx, hosts={"a.example.com"})
         self.assertEqual(findings, [])
 
-    @patch("subrecon.check_single_bucket_exists")
+    @patch("volt.check_single_bucket_exists")
     def test_collect_s3_bucket_findings_error_when_all_checks_fail(
         self, mock_bucket_check
     ) -> None:
         mock_bucket_check.return_value = ("example", 0, "unknown", "", None)
         ctx = self._default_context()
-        health = subrecon.init_source_health("s3")
-        findings = subrecon.collect_s3_bucket_findings(
+        health = volt.init_source_health("s3")
+        findings = volt.collect_s3_bucket_findings(
             ctx, hosts={"a.example.com"}, health=health
         )
         self.assertEqual(findings, [])
         self.assertGreater(health["errors"], 0)
         self.assertEqual(health["status"], "error")
 
-    @patch("subrecon.check_single_azure_blob_container")
-    @patch("subrecon.probe_azure_blob_object_access")
-    @patch("subrecon.fetch_doh_cname_records")
+    @patch("volt.check_single_bucket_exists")
+    def test_collect_s3_bucket_findings_partial_when_some_checks_succeed(
+        self, mock_bucket_check
+    ) -> None:
+        first = {"seen": False}
+
+        def fake_check(*_args, **_kwargs):
+            if not first["seen"]:
+                first["seen"] = True
+                return ("example", 0, "unknown", "", None)
+            return ("example", 404, "unknown", "", 404)
+
+        mock_bucket_check.side_effect = fake_check
+        ctx = self._default_context()
+        health = volt.init_source_health("s3")
+        findings = volt.collect_s3_bucket_findings(
+            ctx, hosts={"a.example.com"}, health=health
+        )
+        self.assertEqual(findings, [])
+        self.assertGreater(health["errors"], 0)
+        self.assertEqual(health["status"], "partial")
+
+    @patch("volt.check_single_azure_blob_container")
+    @patch("volt.probe_azure_blob_object_access")
+    @patch("volt.fetch_doh_cname_records")
     def test_collect_azure_blob_findings_detects_public_container(
         self, mock_fetch_doh, _mock_probe_object, mock_check_azure
     ) -> None:
@@ -1188,8 +1302,8 @@ class SubreconPipelineTest(unittest.TestCase):
 
         ctx = self._default_context()
         ctx.keywords = ["example"]
-        health = subrecon.init_source_health("azure")
-        findings = subrecon.collect_azure_blob_findings(
+        health = volt.init_source_health("azure")
+        findings = volt.collect_azure_blob_findings(
             ctx, {"app.example.com"}, health
         )
         self.assertEqual(len(findings), 1)
@@ -1198,9 +1312,9 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(health["status"], "ok")
         self.assertEqual(health["findings"], 1)
 
-    @patch("subrecon.check_single_azure_blob_container")
-    @patch("subrecon.probe_azure_blob_object_access")
-    @patch("subrecon.fetch_doh_cname_records")
+    @patch("volt.check_single_azure_blob_container")
+    @patch("volt.probe_azure_blob_object_access")
+    @patch("volt.fetch_doh_cname_records")
     def test_collect_azure_blob_findings_includes_system_containers(
         self, mock_fetch_doh, _mock_probe_object, mock_check_azure
     ) -> None:
@@ -1240,16 +1354,16 @@ class SubreconPipelineTest(unittest.TestCase):
         ctx.organization = ""
         ctx.keywords = []
         ctx.max_bucket_candidates = 20
-        health = subrecon.init_source_health("azure")
-        findings = subrecon.collect_azure_blob_findings(
+        health = volt.init_source_health("azure")
+        findings = volt.collect_azure_blob_findings(
             ctx, {"app.example.com"}, health
         )
         self.assertTrue(any(f.asset == "acmestorage/$web" for f in findings))
         self.assertGreater(health.get("system_container_hits", 0), 0)
 
-    @patch("subrecon.check_single_azure_blob_container")
-    @patch("subrecon.probe_azure_blob_object_access")
-    @patch("subrecon.fetch_doh_cname_records")
+    @patch("volt.check_single_azure_blob_container")
+    @patch("volt.probe_azure_blob_object_access")
+    @patch("volt.fetch_doh_cname_records")
     def test_collect_azure_blob_findings_infers_account_from_host_without_cname(
         self, mock_fetch_doh, _mock_probe_object, mock_check_azure
     ) -> None:
@@ -1289,17 +1403,17 @@ class SubreconPipelineTest(unittest.TestCase):
         ctx.organization = ""
         ctx.keywords = ["example"]
         ctx.max_bucket_candidates = 200
-        health = subrecon.init_source_health("azure")
-        findings = subrecon.collect_azure_blob_findings(
+        health = volt.init_source_health("azure")
+        findings = volt.collect_azure_blob_findings(
             ctx, {"acmestorage.blob.core.windows.net"}, health
         )
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].asset, "acmestorage/example")
         self.assertEqual(health["status"], "ok")
 
-    @patch("subrecon.check_single_azure_blob_container")
-    @patch("subrecon.probe_azure_blob_object_access")
-    @patch("subrecon.fetch_doh_cname_records")
+    @patch("volt.check_single_azure_blob_container")
+    @patch("volt.probe_azure_blob_object_access")
+    @patch("volt.fetch_doh_cname_records")
     def test_collect_azure_blob_findings_tracks_error_code_telemetry(
         self, mock_fetch_doh, _mock_probe_object, mock_check_azure
     ) -> None:
@@ -1348,8 +1462,8 @@ class SubreconPipelineTest(unittest.TestCase):
         ctx.organization = ""
         ctx.keywords = []
         ctx.max_bucket_candidates = 3
-        health = subrecon.init_source_health("azure")
-        findings = subrecon.collect_azure_blob_findings(
+        health = volt.init_source_health("azure")
+        findings = volt.collect_azure_blob_findings(
             ctx, {"app.example.com"}, health
         )
         self.assertEqual(findings, [])
@@ -1362,9 +1476,9 @@ class SubreconPipelineTest(unittest.TestCase):
             health.get("error_code_counts", {}).get("ContainerNotFound"), 1
         )
 
-    @patch("subrecon.check_single_azure_blob_container")
-    @patch("subrecon.probe_azure_blob_object_access")
-    @patch("subrecon.fetch_doh_cname_records")
+    @patch("volt.check_single_azure_blob_container")
+    @patch("volt.probe_azure_blob_object_access")
+    @patch("volt.fetch_doh_cname_records")
     def test_collect_azure_blob_findings_detects_blob_only_public_access(
         self, mock_fetch_doh, mock_probe_object, mock_check_azure
     ) -> None:
@@ -1425,15 +1539,15 @@ class SubreconPipelineTest(unittest.TestCase):
         ctx.keywords = ["example"]
         ctx.max_bucket_candidates = 40
         ctx.azure_blob_object_probe = True
-        health = subrecon.init_source_health("azure")
-        findings = subrecon.collect_azure_blob_findings(
+        health = volt.init_source_health("azure")
+        findings = volt.collect_azure_blob_findings(
             ctx, {"app.example.com"}, health
         )
         self.assertTrue(any(f.asset == "acmestorage/example" for f in findings))
         self.assertGreater(health.get("blob_only_hits", 0), 0)
         self.assertGreater(health.get("blob_object_probes", 0), 0)
 
-    @patch("subrecon.fetch_doh_cname_records")
+    @patch("volt.fetch_doh_cname_records")
     def test_collect_azure_blob_findings_partial_when_doh_errors(
         self, mock_fetch_doh
     ) -> None:
@@ -1443,15 +1557,15 @@ class SubreconPipelineTest(unittest.TestCase):
             "https://dns.google/resolve?name=app.example.com&type=CNAME",
         )
         ctx = self._default_context()
-        health = subrecon.init_source_health("azure")
-        findings = subrecon.collect_azure_blob_findings(
+        health = volt.init_source_health("azure")
+        findings = volt.collect_azure_blob_findings(
             ctx, {"app.example.com"}, health
         )
         self.assertEqual(findings, [])
         self.assertEqual(health["errors"], 1)
         self.assertEqual(health["status"], "partial")
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_check_single_bucket_exists_uses_list_probe_for_ambiguous_head(
         self, mock_fetch_url
     ) -> None:
@@ -1461,7 +1575,7 @@ class SubreconPipelineTest(unittest.TestCase):
             (200, "<ListBucketResult/>", {"server": "AmazonS3"}),
         ]
         bucket, status, existence, region, list_status = (
-            subrecon.check_single_bucket_exists(
+            volt.check_single_bucket_exists(
                 "noaa-goes19",
                 5,
                 s3_list_probe=True,
@@ -1474,10 +1588,10 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(list_status, 200)
         head_call = mock_fetch_url.call_args_list[0]
         self.assertEqual(
-            head_call.kwargs.get("retries"), subrecon.CLOUD_PROBE_HTTP_RETRIES
+            head_call.kwargs.get("retries"), volt.CLOUD_PROBE_HTTP_RETRIES
         )
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_check_single_bucket_exists_defaults_to_list_probe(
         self, mock_fetch_url
     ) -> None:
@@ -1485,7 +1599,7 @@ class SubreconPipelineTest(unittest.TestCase):
             (404, "", {"server": "AmazonS3", "x-amz-bucket-region": "us-east-1"}),
             (403, "", {"x-amz-bucket-region": "us-east-1"}),
         ]
-        _, _, existence, region, list_status = subrecon.check_single_bucket_exists(
+        _, _, existence, region, list_status = volt.check_single_bucket_exists(
             "example-bucket",
             5,
         )
@@ -1497,7 +1611,7 @@ class SubreconPipelineTest(unittest.TestCase):
             mock_fetch_url.call_args_list[1].args[0],
         )
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_check_single_bucket_exists_uses_object_probe_for_nosuchkey_signal(
         self, mock_fetch_url
     ) -> None:
@@ -1506,7 +1620,7 @@ class SubreconPipelineTest(unittest.TestCase):
             (404, "<Error><Code>NoSuchBucket</Code></Error>", {"server": "AmazonS3"}),
             (404, "<Error><Code>NoSuchKey</Code></Error>", {"server": "AmazonS3"}),
         ]
-        _, status, existence, _, list_status = subrecon.check_single_bucket_exists(
+        _, status, existence, _, list_status = volt.check_single_bucket_exists(
             "noaa-goes16",
             5,
         )
@@ -1519,7 +1633,7 @@ class SubreconPipelineTest(unittest.TestCase):
             mock_fetch_url.call_args_list[2].args[0],
         )
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_check_single_bucket_exists_uses_website_probe_when_enabled(
         self, mock_fetch_url
     ) -> None:
@@ -1529,7 +1643,7 @@ class SubreconPipelineTest(unittest.TestCase):
             (404, "<Error><Code>AccessDenied</Code></Error>", {"server": "AmazonS3"}),
             (403, "", {}),
         ]
-        _, _, existence, region, _ = subrecon.check_single_bucket_exists(
+        _, _, existence, region, _ = volt.check_single_bucket_exists(
             "example-website-bucket",
             5,
             s3_website_probe=True,
@@ -1541,7 +1655,7 @@ class SubreconPipelineTest(unittest.TestCase):
             mock_fetch_url.call_args_list[3].args[0],
         )
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_check_single_bucket_exists_respects_s3_probe_retry_override(
         self, mock_fetch_url
     ) -> None:
@@ -1550,14 +1664,14 @@ class SubreconPipelineTest(unittest.TestCase):
             (404, "<Error><Code>NoSuchBucket</Code></Error>", {"server": "AmazonS3"}),
             (404, "<Error><Code>NoSuchBucket</Code></Error>", {"server": "AmazonS3"}),
         ]
-        subrecon.check_single_bucket_exists(
+        volt.check_single_bucket_exists(
             "retry-test-bucket",
             5,
             s3_probe_retries=1,
         )
         self.assertEqual(mock_fetch_url.call_args_list[0].kwargs.get("retries"), 1)
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_check_single_bucket_exists_uses_object_probe_for_nosuchbucket_signal(
         self, mock_fetch_url
     ) -> None:
@@ -1566,13 +1680,41 @@ class SubreconPipelineTest(unittest.TestCase):
             (404, "<Error><Code>NoSuchBucket</Code></Error>", {"server": "AmazonS3"}),
             (404, "<Error><Code>NoSuchBucket</Code></Error>", {"server": "AmazonS3"}),
         ]
-        _, _, existence, _, _ = subrecon.check_single_bucket_exists(
-            "definitely-not-real-subrecon-bucket-xyz987",
+        _, _, existence, _, _ = volt.check_single_bucket_exists(
+            "definitely-not-real-volt-bucket-xyz987",
             5,
         )
-        self.assertEqual(existence, "not_exists")
+        self.assertEqual(existence, "unknown")
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
+    def test_check_single_bucket_exists_website_probe_infers_region_when_unknown(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.side_effect = [
+            (404, "", {"server": "AmazonS3"}),
+            (404, "<Error><Code>NoSuchBucket</Code></Error>", {"server": "AmazonS3"}),
+            (404, "<Error><Code>NoSuchBucket</Code></Error>", {"server": "AmazonS3"}),
+            (
+                400,
+                "<Error><Code>IncorrectEndpoint</Code></Error>",
+                {
+                    "x-amz-error-code": "IncorrectEndpoint",
+                    "x-amz-error-detail-endpoint": (
+                        "toolbox2.s3-website-us-west-2.amazonaws.com"
+                    ),
+                },
+            ),
+            (200, "", {}),
+        ]
+        _, _, existence, region, _ = volt.check_single_bucket_exists(
+            "toolbox2",
+            5,
+            s3_website_probe=True,
+        )
+        self.assertEqual(existence, "confirmed_exists")
+        self.assertIn(region, {"", "us-west-2"})
+
+    @patch("volt.fetch_url")
     def test_check_single_azure_blob_container_uses_cloud_probe_retry_policy(
         self, mock_fetch_url
     ) -> None:
@@ -1580,7 +1722,7 @@ class SubreconPipelineTest(unittest.TestCase):
             (200, "", {}),
             (200, "", {}),
         ]
-        _, _, status, _, _, _ = subrecon.check_single_azure_blob_container(
+        _, _, status, _, _, _ = volt.check_single_azure_blob_container(
             "azureopendatastorage",
             "mlsamples",
             5,
@@ -1591,17 +1733,17 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(mock_fetch_url.call_args_list[1].kwargs.get("method"), "GET")
         self.assertEqual(
             mock_fetch_url.call_args_list[0].kwargs.get("retries"),
-            subrecon.CLOUD_PROBE_HTTP_RETRIES,
+            volt.CLOUD_PROBE_HTTP_RETRIES,
         )
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_check_single_azure_blob_container_respects_probe_retry_override(
         self, mock_fetch_url
     ) -> None:
         mock_fetch_url.side_effect = [
             (404, "<Error><Code>ContainerNotFound</Code></Error>", {}),
         ]
-        subrecon.check_single_azure_blob_container(
+        volt.check_single_azure_blob_container(
             "azureopendatastorage",
             "definitely-not-real-container-xyz",
             5,
@@ -1609,7 +1751,7 @@ class SubreconPipelineTest(unittest.TestCase):
         )
         self.assertEqual(mock_fetch_url.call_args_list[0].kwargs.get("retries"), 1)
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_probe_azure_blob_object_access_respects_probe_retry_override(
         self, mock_fetch_url
     ) -> None:
@@ -1618,7 +1760,7 @@ class SubreconPipelineTest(unittest.TestCase):
             "<Error><Code>BlobNotFound</Code></Error>",
             {},
         )
-        status, error_code, url = subrecon.probe_azure_blob_object_access(
+        status, error_code, url = volt.probe_azure_blob_object_access(
             "azureopendatastorage",
             "$web",
             "index.html",
@@ -1630,12 +1772,12 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertIn("/%24web/index.html", url)
         self.assertEqual(mock_fetch_url.call_args_list[0].kwargs.get("retries"), 1)
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_check_single_azure_blob_container_encodes_system_container_name(
         self, mock_fetch_url
     ) -> None:
         mock_fetch_url.return_value = (200, "", {})
-        subrecon.check_single_azure_blob_container(
+        volt.check_single_azure_blob_container(
             "azureopendatastorage",
             "$web",
             5,
@@ -1645,7 +1787,7 @@ class SubreconPipelineTest(unittest.TestCase):
             mock_fetch_url.call_args.args[0],
         )
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_check_single_azure_blob_container_retries_with_version_header(
         self, mock_fetch_url
     ) -> None:
@@ -1654,7 +1796,7 @@ class SubreconPipelineTest(unittest.TestCase):
             (200, "", {}),
             (200, "", {}),
         ]
-        _, _, status, existence, _, _ = subrecon.check_single_azure_blob_container(
+        _, _, status, existence, _, _ = volt.check_single_azure_blob_container(
             "azureopendatastorage",
             "nyctlc",
             5,
@@ -1664,10 +1806,10 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(mock_fetch_url.call_count, 3)
         self.assertEqual(
             mock_fetch_url.call_args_list[1].kwargs.get("headers"),
-            {"x-ms-version": subrecon.AZURE_BLOB_API_VERSION},
+            {"x-ms-version": volt.AZURE_BLOB_API_VERSION},
         )
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_check_single_azure_blob_container_short_circuits_on_not_exists_head(
         self, mock_fetch_url
     ) -> None:
@@ -1677,7 +1819,7 @@ class SubreconPipelineTest(unittest.TestCase):
             {},
         )
         _, _, status, existence, error_code, url = (
-            subrecon.check_single_azure_blob_container(
+            volt.check_single_azure_blob_container(
                 "azureopendatastorage",
                 "definitely-not-real-container-xyz",
                 5,
@@ -1691,12 +1833,12 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertNotIn("comp=list", url)
 
     def test_match_takeover_signature(self) -> None:
-        signature, cname = subrecon.match_takeover_signature(["foo.readthedocs.io"])
+        signature, cname = volt.match_takeover_signature(["foo.readthedocs.io"])
         self.assertIsNotNone(signature)
         self.assertEqual(cname, "foo.readthedocs.io")
         self.assertEqual(signature["provider"], "Read the Docs")
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_collect_subdomain_takeover_findings_detects_confirmed(
         self, mock_fetch_url
     ) -> None:
@@ -1725,8 +1867,8 @@ class SubreconPipelineTest(unittest.TestCase):
             ),
         ]
         ctx = self._default_context()
-        health = subrecon.init_source_health("takeover")
-        findings = subrecon.collect_subdomain_takeover_findings(
+        health = volt.init_source_health("takeover")
+        findings = volt.collect_subdomain_takeover_findings(
             ctx,
             {"docs.example.com"},
             health,
@@ -1739,9 +1881,9 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(health["status"], "ok")
         self.assertEqual(health["findings"], 1)
         for call in mock_fetch_url.call_args_list:
-            self.assertEqual(call.kwargs.get("retries"), subrecon.TAKEOVER_HTTP_RETRIES)
+            self.assertEqual(call.kwargs.get("retries"), volt.TAKEOVER_HTTP_RETRIES)
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_collect_subdomain_takeover_findings_requires_fingerprint(
         self, mock_fetch_url
     ) -> None:
@@ -1764,8 +1906,8 @@ class SubreconPipelineTest(unittest.TestCase):
             (200, "Welcome to docs", {}),
         ]
         ctx = self._default_context()
-        health = subrecon.init_source_health("takeover")
-        findings = subrecon.collect_subdomain_takeover_findings(
+        health = volt.init_source_health("takeover")
+        findings = volt.collect_subdomain_takeover_findings(
             ctx,
             {"docs.example.com"},
             health,
@@ -1773,9 +1915,9 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(findings, [])
         self.assertEqual(health["status"], "ok_no_results")
         for call in mock_fetch_url.call_args_list:
-            self.assertEqual(call.kwargs.get("retries"), subrecon.TAKEOVER_HTTP_RETRIES)
+            self.assertEqual(call.kwargs.get("retries"), volt.TAKEOVER_HTTP_RETRIES)
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_collect_subdomain_takeover_findings_partial_on_probe_error(
         self, mock_fetch_url
     ) -> None:
@@ -1817,8 +1959,8 @@ class SubreconPipelineTest(unittest.TestCase):
         mock_fetch_url.side_effect = fake_fetch
         ctx = self._default_context()
         ctx.threads = 1
-        health = subrecon.init_source_health("takeover")
-        findings = subrecon.collect_subdomain_takeover_findings(
+        health = volt.init_source_health("takeover")
+        findings = volt.collect_subdomain_takeover_findings(
             ctx, {"bad.example.com", "good.example.com"}, health
         )
         self.assertEqual(len(findings), 1)
@@ -1826,7 +1968,7 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(health["errors"], 1)
         self.assertEqual(health["status"], "partial")
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_fetch_commoncrawl_index_endpoint_uses_search_retry_policy(
         self, mock_fetch_url
     ) -> None:
@@ -1835,27 +1977,27 @@ class SubreconPipelineTest(unittest.TestCase):
             '[{"cdx-api":"https://index.commoncrawl.org/CC-MAIN-2026-10-index"}]',
             {},
         )
-        endpoint = subrecon.fetch_commoncrawl_index_endpoint(timeout=5)
+        endpoint = volt.fetch_commoncrawl_index_endpoint(timeout=5)
         self.assertEqual(
             endpoint, "https://index.commoncrawl.org/CC-MAIN-2026-10-index"
         )
         self.assertEqual(mock_fetch_url.call_count, 1)
         self.assertEqual(
             mock_fetch_url.call_args.kwargs.get("retries"),
-            subrecon.SEARCH_HTTP_RETRIES,
+            volt.SEARCH_HTTP_RETRIES,
         )
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_fetch_commoncrawl_index_endpoint_falls_back_to_id(
         self, mock_fetch_url
     ) -> None:
         mock_fetch_url.return_value = (200, '[{"id":"CC-MAIN-2026-10"}]', {})
-        endpoint = subrecon.fetch_commoncrawl_index_endpoint(timeout=5)
+        endpoint = volt.fetch_commoncrawl_index_endpoint(timeout=5)
         self.assertEqual(
             endpoint, "https://index.commoncrawl.org/CC-MAIN-2026-10-index"
         )
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_fetch_commoncrawl_index_endpoint_prefers_newest_cc_main(
         self, mock_fetch_url
     ) -> None:
@@ -1870,12 +2012,12 @@ class SubreconPipelineTest(unittest.TestCase):
             ),
             {},
         )
-        endpoint = subrecon.fetch_commoncrawl_index_endpoint(timeout=5)
+        endpoint = volt.fetch_commoncrawl_index_endpoint(timeout=5)
         self.assertEqual(
             endpoint, "https://index.commoncrawl.org/CC-MAIN-2026-05-index"
         )
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_fetch_commoncrawl_results_dedupes_duplicate_urls(
         self, mock_fetch_url
     ) -> None:
@@ -1890,7 +2032,7 @@ class SubreconPipelineTest(unittest.TestCase):
             ),
             {},
         )
-        status, results, query_url = subrecon.fetch_commoncrawl_results(
+        status, results, query_url = volt.fetch_commoncrawl_results(
             "https://index.commoncrawl.org/CC-MAIN-2026-10-index",
             "*.example.com/*.env",
             timeout=5,
@@ -1904,7 +2046,7 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertIn("output=json", query_url)
         self.assertIn("filter==status:200", query_url)
 
-    @patch("subrecon.fetch_url")
+    @patch("volt.fetch_url")
     def test_fetch_commoncrawl_results_falls_back_when_filter_not_supported(
         self, mock_fetch_url
     ) -> None:
@@ -1912,7 +2054,7 @@ class SubreconPipelineTest(unittest.TestCase):
             (422, "", {}),
             (200, '{"url":"https://a.example.com/.env"}\n', {}),
         ]
-        status, results, query_url = subrecon.fetch_commoncrawl_results(
+        status, results, query_url = volt.fetch_commoncrawl_results(
             "https://index.commoncrawl.org/CC-MAIN-2026-10-index",
             "*.example.com/*.env",
             timeout=5,
@@ -1922,7 +2064,7 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertNotIn("filter==status:200", query_url)
 
     def test_build_parser_rejects_non_positive_numeric_flags(self) -> None:
-        parser = subrecon.build_parser()
+        parser = volt.build_parser()
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
                 parser.parse_args(["-d", "example.com", "--timeout", "0"])
@@ -1932,23 +2074,23 @@ class SubreconPipelineTest(unittest.TestCase):
                 parser.parse_args(["-d", "example.com", "--max-bucket-candidates", "0"])
 
     def test_build_parser_version_flag(self) -> None:
-        parser = subrecon.build_parser()
+        parser = volt.build_parser()
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
             with self.assertRaises(SystemExit) as exc:
                 parser.parse_args(["--version"])
         self.assertEqual(exc.exception.code, 0)
-        self.assertIn(subrecon.__version__, stdout.getvalue())
+        self.assertIn(volt.__version__, stdout.getvalue())
 
     def test_build_parser_s3_list_probe_default_and_disable_flag(self) -> None:
-        parser = subrecon.build_parser()
+        parser = volt.build_parser()
         args = parser.parse_args(["-d", "example.com"])
         self.assertTrue(args.s3_list_probe)
         args = parser.parse_args(["-d", "example.com", "--no-s3-list-probe"])
         self.assertFalse(args.s3_list_probe)
 
     def test_build_parser_s3_website_probe_and_retry_defaults(self) -> None:
-        parser = subrecon.build_parser()
+        parser = volt.build_parser()
         args = parser.parse_args(["-d", "example.com"])
         self.assertFalse(args.s3_website_probe)
         self.assertEqual(args.s3_probe_retries, 0)
@@ -1959,14 +2101,14 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(args.s3_probe_retries, 1)
 
     def test_build_parser_takeover_default_and_disable_flag(self) -> None:
-        parser = subrecon.build_parser()
+        parser = volt.build_parser()
         args = parser.parse_args(["-d", "example.com"])
         self.assertFalse(args.no_takeover)
         args = parser.parse_args(["-d", "example.com", "--no-takeover"])
         self.assertTrue(args.no_takeover)
 
     def test_build_parser_gcp_default_and_disable_flag(self) -> None:
-        parser = subrecon.build_parser()
+        parser = volt.build_parser()
         args = parser.parse_args(["-d", "example.com"])
         self.assertFalse(args.no_gcp)
         self.assertFalse(args.gcp_dual_endpoint_probe)
@@ -1979,7 +2121,7 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(args.gcp_probe_retries, 1)
 
     def test_build_parser_azure_default_and_disable_flag(self) -> None:
-        parser = subrecon.build_parser()
+        parser = volt.build_parser()
         args = parser.parse_args(["-d", "example.com"])
         self.assertFalse(args.no_azure)
         self.assertFalse(args.azure_blob_object_probe)
@@ -1992,13 +2134,13 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(args.azure_probe_retries, 1)
 
     def test_build_parser_reliability_defaults(self) -> None:
-        parser = subrecon.build_parser()
+        parser = volt.build_parser()
         args = parser.parse_args(["-d", "example.com"])
         self.assertEqual(args.tool_timeout, 120)
         self.assertEqual(args.max_bucket_candidates, 300)
 
     def test_build_parser_search_provider_default_and_override(self) -> None:
-        parser = subrecon.build_parser()
+        parser = volt.build_parser()
         args = parser.parse_args(["-d", "example.com"])
         self.assertEqual(args.search_providers, "commoncrawl")
         args = parser.parse_args(
@@ -2006,14 +2148,14 @@ class SubreconPipelineTest(unittest.TestCase):
         )
         self.assertEqual(args.search_providers, "bing,commoncrawl")
 
-    @patch("subrecon.collect_subdomain_takeover_findings")
-    @patch("subrecon.collect_azure_blob_findings")
-    @patch("subrecon.collect_gcp_bucket_findings")
-    @patch("subrecon.collect_s3_bucket_findings")
-    @patch("subrecon.collect_search_index_findings")
-    @patch("subrecon.collect_ct_subdomains")
-    @patch("subrecon.collect_amass_subdomains")
-    @patch("subrecon.collect_subfinder_subdomains")
+    @patch("volt.collect_subdomain_takeover_findings")
+    @patch("volt.collect_azure_blob_findings")
+    @patch("volt.collect_gcp_bucket_findings")
+    @patch("volt.collect_s3_bucket_findings")
+    @patch("volt.collect_search_index_findings")
+    @patch("volt.collect_ct_subdomains")
+    @patch("volt.collect_amass_subdomains")
+    @patch("volt.collect_subfinder_subdomains")
     @patch("builtins.print")
     def test_run_scan_orchestrates_sources_and_dedupes(
         self,
@@ -2070,7 +2212,7 @@ class SubreconPipelineTest(unittest.TestCase):
             no_azure=False,
             no_takeover=False,
         )
-        report = subrecon.run_scan(args)
+        report = volt.run_scan(args)
 
         self.assertEqual(report["targets"], ["example.com"])
         self.assertEqual(report["summary"]["total_findings"], 3)
@@ -2109,17 +2251,17 @@ class SubreconPipelineTest(unittest.TestCase):
             no_takeover=True,
         )
         with self.assertRaises(ValueError):
-            subrecon.run_scan(args)
+            volt.run_scan(args)
 
     @patch("builtins.print")
-    @patch("subrecon.collect_subdomain_takeover_findings")
-    @patch("subrecon.collect_azure_blob_findings")
-    @patch("subrecon.collect_gcp_bucket_findings")
-    @patch("subrecon.collect_s3_bucket_findings")
-    @patch("subrecon.collect_search_index_findings")
-    @patch("subrecon.collect_ct_subdomains")
-    @patch("subrecon.collect_amass_subdomains")
-    @patch("subrecon.collect_subfinder_subdomains")
+    @patch("volt.collect_subdomain_takeover_findings")
+    @patch("volt.collect_azure_blob_findings")
+    @patch("volt.collect_gcp_bucket_findings")
+    @patch("volt.collect_s3_bucket_findings")
+    @patch("volt.collect_search_index_findings")
+    @patch("volt.collect_ct_subdomains")
+    @patch("volt.collect_amass_subdomains")
+    @patch("volt.collect_subfinder_subdomains")
     def test_run_scan_emits_source_health_warning_lines_when_degraded(
         self,
         mock_subfinder,
@@ -2172,7 +2314,7 @@ class SubreconPipelineTest(unittest.TestCase):
             no_azure=True,
             no_takeover=True,
         )
-        subrecon.run_scan(args)
+        volt.run_scan(args)
 
         printed = "\n".join(str(call.args[0]) for call in mock_print.call_args_list)
         self.assertIn("[!] Source reliability warnings:", printed)

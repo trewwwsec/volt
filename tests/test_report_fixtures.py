@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import cli
-import subrecon
+import volt
 from models import Evidence, Finding, ScanContext
 
 
@@ -95,7 +95,7 @@ class ReportFixtureTest(unittest.TestCase):
                 parse_search_providers=lambda _value: ["commoncrawl"],
                 parse_keywords=lambda _value: [],
                 scan_context_cls=ScanContext,
-                init_source_health=subrecon.init_source_health,
+                init_source_health=volt.init_source_health,
                 collect_subfinder_subdomains=lambda _ctx, _health: (set(), []),
                 collect_amass_subdomains=lambda _ctx, _health: (set(), []),
                 collect_ct_subdomains=fake_ct,
@@ -104,11 +104,11 @@ class ReportFixtureTest(unittest.TestCase):
                 collect_gcp_bucket_findings=lambda _ctx, _hosts, _health: [],
                 collect_azure_blob_findings=lambda _ctx, _hosts, _health: [],
                 collect_subdomain_takeover_findings=lambda _ctx, _hosts, _health: [],
-                dedupe_findings=subrecon.dedupe_findings,
-                make_summary=subrecon.make_summary,
-                finding_sort_key=subrecon.finding_sort_key,
+                dedupe_findings=volt.dedupe_findings,
+                make_summary=volt.make_summary,
+                finding_sort_key=volt.finding_sort_key,
                 asdict_fn=asdict,
-                normalize_source_health=subrecon.normalize_source_health,
+                normalize_source_health=volt.normalize_source_health,
                 now_utc_iso=lambda: "2026-03-22T00:00:00+00:00",
             )
 

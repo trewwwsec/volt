@@ -1,1 +1,1 @@
-"""Source collector modules for subrecon."""
+"""Source collector modules for volt."""

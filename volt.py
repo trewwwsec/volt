@@ -112,7 +112,7 @@ from sources.tools import (
 )
 from models import Finding, ScanContext
 from reporting import dedupe_findings, finding_sort_key, make_summary
-from subrecon_version import __version__
+from volt_version import __version__
 
 
 def log(msg: str, verbose: bool = False, force: bool = False) -> None:

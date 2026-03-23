@@ -28,7 +28,7 @@ wheels = [
 ]
 
 [[package]]
-name = "subrecon"
+name = "volt"
 source = { editable = "." }
 
 [package.dev-dependencies]

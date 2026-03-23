@@ -8,6 +8,7 @@ from typing import Any
 import subrecon
 
 DEFAULT_CANDIDATES = [
+    "toolbox2",
     "noaa-goes19",
     "noaa-goes18",
     "noaa-goes17",
@@ -36,10 +37,15 @@ def parse_candidates(value: str) -> list[str]:
 def is_viable_probe(probe: dict[str, Any]) -> bool:
     existence = probe.get("existence", "")
     status = probe.get("status")
+    region = str(probe.get("region") or "").strip()
     if existence == "confirmed_exists":
         return True
-    if existence == "likely_exists" and status in {200, 301, 302, 307, 308, 403}:
-        return True
+    if existence == "likely_exists":
+        if status in {200, 301, 302, 307, 308, 403}:
+            return True
+        # Passive website probe can infer existence from endpoint redirects.
+        if status in {400, 404} and region:
+            return True
     return False
 
 
@@ -85,7 +91,7 @@ def main() -> int:
                 bucket,
                 args.timeout,
                 True,
-                False,
+                True,
                 0,
             )
         )

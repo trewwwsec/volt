@@ -10,6 +10,31 @@ from urllib.parse import quote
 from core import record_source_error
 from models import Evidence, Finding, ScanContext
 
+S3_WEBSITE_PROBE_REGIONS = (
+    "us-east-1",
+    "us-west-2",
+    "eu-west-1",
+)
+
+
+def _header_value(headers: dict[str, str], key: str) -> str:
+    for header_key, header_value in headers.items():
+        if header_key.lower() == key.lower():
+            return header_value
+    return ""
+
+
+def _extract_s3_website_region(endpoint: str) -> str:
+    value = endpoint.strip().lower().rstrip(".")
+    match = re.search(
+        r"\.s3-website(?:-|\.)"
+        r"([a-z0-9-]+)\.amazonaws\.com$",
+        value,
+    )
+    if match:
+        return match.group(1)
+    return ""
+
 
 def sanitize_bucket_label(value: str) -> str:
     cleaned = re.sub(r"[^a-z0-9.-]", "-", value.lower())
@@ -463,19 +488,54 @@ def probe_s3_website_access(
     cloud_probe_http_retries: int,
 ) -> tuple[int, dict[str, str], str]:
     # S3 website endpoints are HTTP-only.
-    website_hosts = [
-        f"{bucket}.s3-website-{region}.amazonaws.com",
-        f"{bucket}.s3-website.{region}.amazonaws.com",
-    ]
-    for host in website_hosts:
-        status, body, headers = fetch_url(
-            f"http://{host}/",
-            timeout=timeout,
-            method="GET",
-            retries=cloud_probe_http_retries,
-        )
-        if status != 0:
-            return status, headers, parse_s3_error_code(headers, body)
+    unknown_region_scan = not bool(region)
+    regions_to_try: list[str] = []
+    if region:
+        regions_to_try.append(region)
+    else:
+        regions_to_try.extend(S3_WEBSITE_PROBE_REGIONS)
+
+    queued = set(regions_to_try)
+    non_zero_fallback: tuple[int, dict[str, str], str] = (0, {}, "")
+    incorrect_endpoint_fallback: tuple[int, dict[str, str], str] = (0, {}, "")
+    idx = 0
+    while idx < len(regions_to_try):
+        target_region = regions_to_try[idx]
+        idx += 1
+        website_hosts = [
+            f"{bucket}.s3-website-{target_region}.amazonaws.com",
+            f"{bucket}.s3-website.{target_region}.amazonaws.com",
+        ]
+        for host in website_hosts:
+            status, body, headers = fetch_url(
+                f"http://{host}/",
+                timeout=timeout,
+                method="GET",
+                retries=cloud_probe_http_retries,
+            )
+            if status == 0:
+                continue
+            error_code = parse_s3_error_code(headers, body)
+            non_zero_fallback = (status, headers, error_code)
+
+            if status == 200 or status == 403 or status in {301, 302, 307, 308}:
+                return status, headers, error_code
+
+            if error_code == "IncorrectEndpoint":
+                endpoint = _header_value(headers, "x-amz-error-detail-endpoint")
+                inferred_region = _extract_s3_website_region(endpoint)
+                if inferred_region and inferred_region not in queued:
+                    regions_to_try.append(inferred_region)
+                    queued.add(inferred_region)
+                incorrect_endpoint_fallback = (status, headers, error_code)
+            if unknown_region_scan:
+                continue
+            return status, headers, error_code
+
+    if incorrect_endpoint_fallback[0] != 0:
+        return incorrect_endpoint_fallback
+    if non_zero_fallback[0] != 0:
+        return non_zero_fallback
     return 0, {}, ""
 
 
@@ -535,20 +595,27 @@ def check_single_bucket_exists(
         elif object_status == 404 and object_error_code == "NoSuchKey":
             existence = "confirmed_exists"
         elif object_status == 404 and object_error_code == "NoSuchBucket":
-            existence = "not_exists"
+            # Modern S3 often cloaks existing private buckets as NoSuchBucket.
+            # Keep this ambiguous unless a stronger passive signal is available.
+            existence = "unknown"
 
-    if s3_website_probe and existence == "unknown" and region:
+    if s3_website_probe and existence == "unknown":
         website_status, _website_headers, website_error_code = probe_s3_website_access(
-            bucket, region, timeout
+            bucket, region or "", timeout
         )
+        if not region:
+            endpoint = _header_value(_website_headers, "x-amz-error-detail-endpoint")
+            region = _extract_s3_website_region(endpoint) or region
         if website_status == 200:
             existence = "confirmed_exists"
         elif website_status == 403:
             existence = "likely_exists"
         elif website_status in {301, 302, 307, 308}:
             existence = "likely_exists"
+        elif website_status == 400 and website_error_code == "IncorrectEndpoint":
+            existence = "likely_exists"
         elif website_status == 404 and website_error_code == "NoSuchBucket":
-            existence = "not_exists"
+            existence = "unknown"
 
     return bucket, status, existence, region or "", list_status
 
@@ -716,7 +783,10 @@ def collect_s3_bucket_findings(
     stats["hosts"] = len(findings)
     stats["findings"] = len(findings)
     if stats["errors"]:
-        stats["status"] = "partial" if findings else "error"
+        if findings or checked > int(stats["errors"]):
+            stats["status"] = "partial"
+        else:
+            stats["status"] = "error"
     elif findings:
         stats["status"] = "ok"
     else:

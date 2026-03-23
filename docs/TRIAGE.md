@@ -1,6 +1,6 @@
 # Finding Triage Playbook
 
-This playbook maps `subrecon` finding types to practical triage actions.
+This playbook maps `volt` finding types to practical triage actions. Use it after confirming the run was in scope and the relevant source completed with acceptable reliability.
 
 ## General Workflow
 
@@ -8,7 +8,13 @@ This playbook maps `subrecon` finding types to practical triage actions.
 2. Triage high/medium severity findings first.
 3. Confirm target ownership and authorization.
 4. Capture reproducible evidence before remediation.
-5. Re-run `subrecon` after fixes to confirm closure.
+5. Re-run `volt` after fixes to confirm closure.
+
+Interpret findings conservatively:
+
+- Search-index results indicate possible exposure, not guaranteed live exposure.
+- Cloud storage results indicate existence or publicability signals, not full data impact by themselves.
+- Takeover results indicate a reclaimability lead until provider ownership is verified.
 
 ## 1) `indexed_leak`
 
@@ -107,3 +113,4 @@ Before closing findings, review:
 
 If a relevant source is `partial` or `error`, rerun after remediation of source issues to avoid false negatives.
 
+If a source is degraded, treat negative results from that source as inconclusive.

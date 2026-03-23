@@ -6,14 +6,14 @@ Use this template with [docs/PILOT_RUNBOOK.md](PILOT_RUNBOOK.md) during pilot ex
 
 - Date:
 - Operator:
-- Subrecon version (`subrecon --version`):
+- Volt version (`volt --version`):
 - Git commit:
 
 ## Target Run Records
 
 | Target | Run Type | Command Ref | Duration (s) | Total Findings | Degraded Sources (`partial/error`) | Notes |
 | --- | --- | --- | ---: | ---: | --- | --- |
-| example.com | core | `core run` | 0 | 0 | none |  |
+| example.com | core | `core_run` | 0 | 0 | none | Replace with the relevant report key or command label. |
 
 ## Launch Gate Checklist
 
@@ -23,7 +23,7 @@ Use this template with [docs/PILOT_RUNBOOK.md](PILOT_RUNBOOK.md) during pilot ex
 | Deterministic quality gates |  |  |
 | Reliability guidance behavior |  |  |
 | Onboarding docs clarity |  |  |
-| Pilot operator self-sufficiency |  |  |
+| Pilot operator self-sufficiency |  | Must be an unqualified pass. Any caveat, workaround, or maintainer-only interpretation requirement counts as fail. |
 
 ## Decision Record
 
@@ -31,4 +31,3 @@ Use this template with [docs/PILOT_RUNBOOK.md](PILOT_RUNBOOK.md) during pilot ex
 - Rationale:
 - Blocking Issues:
 - Follow-up Actions:
-

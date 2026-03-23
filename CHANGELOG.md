@@ -8,12 +8,12 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 
 ### Added
 
-- Packaging metadata and installable `subrecon` CLI entry point for `uv tool install` and `pipx install`.
-- `--version` CLI flag and centralized version source-of-truth via `subrecon_version.py`.
+- Packaging metadata and installable `volt` CLI entry point for `uv tool install` and `pipx install`.
+- `--version` CLI flag and centralized version source-of-truth via `volt_version.py`.
 - Non-blocking scheduled/manual live-smoke GitHub Actions workflow (`.github/workflows/live-smoke.yml`).
-- Release governance docs: `SECURITY.md` and `docs/RELEASE.md`.
+- Public release governance docs: `SECURITY.md` and `docs/RELEASE.md`.
 - Contributor workflow doc: `CONTRIBUTING.md`.
-- Customer onboarding docs: `docs/QUICKSTART.md` and `docs/TRIAGE.md`.
+- Public onboarding docs: `docs/QUICKSTART.md` and `docs/TRIAGE.md`.
 - Project support policy: `SUPPORT.md`.
 - Pilot execution/launch decision template: `docs/PILOT_RUNBOOK.md`.
 - Pilot metrics capture template: `docs/PILOT_LOG_TEMPLATE.md`.
@@ -29,8 +29,8 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 - S3 live-testing reliability hardened with dynamic canary selection (`scripts/select_s3_canary.py`) and negative-control fallback when known public targets are stale/unavailable.
 - Passive S3 reliability hardened for modern cloaked responses: anonymous `NoSuchBucket` object/website results are treated as ambiguous, and optional website probing now supports unknown-region fallback scanning for stronger passive confirmation.
 - S3 canary selection now includes passive website-probe-aware viability checks (for example `toolbox2`) and pilot harness S3 cases now run with `--s3-website-probe`.
-- Testing docs updated to command-first usage (`uv run subrecon`) and refreshed baseline/snapshot notes.
-- Documentation refreshed with current deterministic baseline (`115` tests) and latest pilot snapshots/case naming.
+- Testing docs updated for command-first usage and refreshed baseline/snapshot notes.
+- Public documentation refreshed with the current deterministic baseline (`115` tests), `volt` branding, and clearer release/support guidance.
 - Degraded `source_health` states (`partial`/`error`) now add deterministic `operator_action` notes and emit a concise terminal reliability warning block.
 - Added deterministic run-scan report fixture coverage to catch schema/output drift in CI.
 - Hardened CT/search collectors against upstream schema/parser drift by handling malformed JSON shapes and provider helper exceptions without crashing.

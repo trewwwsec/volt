@@ -1,10 +1,10 @@
 # Pilot Runbook
 
-Use this runbook to execute a bounded customer pilot and make a launch go/no-go decision.
+Use this runbook to execute a bounded pilot and make a launch go/no-go decision.
 
 Use [docs/PILOT_LOG_TEMPLATE.md](PILOT_LOG_TEMPLATE.md) to capture metrics consistently.
 
-Fast path (from repo root):
+Fast path from the repository root:
 
 ```bash
 scripts/run_pilot_test.sh --mode quick
@@ -28,7 +28,7 @@ scripts/run_pilot_test.sh --mode full
 For each pilot target:
 
 1. Core run:
-   - `subrecon -d <target> -o <target>_core.json`
+   - `volt -d <target> -o <target>_core.json`
 2. Bounded cloud signal checks:
    - S3-only
    - GCS-only
@@ -44,7 +44,7 @@ Reference commands: [docs/TESTING.md](TESTING.md)
 For each run capture:
 
 - Command executed
-- Tool version (`subrecon --version`)
+- Tool version (`volt --version`)
 - Runtime duration
 - `summary.total_findings`
 - `source_health` statuses (`ok`, `ok_no_results`, `partial`, `error`)
@@ -55,7 +55,7 @@ For each run capture:
 Record pass/fail for each gate:
 
 1. Installability:
-   - `uv tool install --from . subrecon` works
+   - `uv tool install --from . volt` works
    - `pipx install .` works
 2. Deterministic quality:
    - lint + format + compile + unit tests all pass
@@ -65,17 +65,20 @@ Record pass/fail for each gate:
 4. Documentation:
    - quickstart and triage docs are sufficient for first-run success
 5. Pilot outcomes:
-   - pilot operators can run and interpret reports without maintainer intervention
+   - pilot operators can install, run, and interpret reports without maintainer intervention
+   - any required caveat, workaround, or maintainer-only context is a failure for this gate
 
 ## 5. Decision Template
 
 Go:
 - All launch gates pass.
+- No launch gate passes "with caveats".
 - No unresolved high-severity defects.
 
 No-go:
 - Reproducible reliability regressions in core flows.
 - Insufficient onboarding/triage clarity for pilot operators.
+- Any pilot path that depends on maintainer knowledge, undocumented caveats, or operator guesswork.
 - Blocking defects without mitigations.
 
 ## 6. Post-Pilot Actions

@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Security fixes are applied on the latest release line.
+Security fixes are applied to the latest release line.
 
 | Version | Supported |
 | --- | --- |
@@ -12,7 +12,7 @@ Security fixes are applied on the latest release line.
 
 ## Reporting a Vulnerability
 
-If you discover a security issue in `subrecon`, report it privately before public disclosure.
+If you discover a security issue in `volt`, report it privately before public disclosure.
 
 Please include:
 
@@ -27,7 +27,8 @@ Preferred channel:
 
 Fallback channel:
 
-- Open an issue marked `security` with minimal detail and request private follow-up.
+- Contact the maintainers privately if a direct contact path is published.
+- If no private channel is available, open a public issue with minimal detail and request private follow-up.
 
 ## Disclosure Expectations
 

@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for contributing to `subrecon`.
+Thanks for contributing to `volt`.
 
 ## Scope and Safety
 
@@ -28,8 +28,8 @@ Run before opening a PR:
 ```bash
 uv run ruff check .
 uv run ruff format --check .
-uv run python -m compileall -q subrecon.py cli.py constants.py core.py models.py networking.py parsing.py reporting.py subrecon_models.py subrecon_reporting.py sources tests
-uv run python -m unittest discover -s tests -p "test_*.py"
+python -m compileall -q volt.py cli.py constants.py core.py models.py networking.py parsing.py reporting.py volt_models.py volt_reporting.py sources tests
+python -m unittest discover -s tests -p "test_*.py"
 ```
 
 Optional live checks are documented in [docs/TESTING.md](docs/TESTING.md).
@@ -41,6 +41,8 @@ Optional live checks are documented in [docs/TESTING.md](docs/TESTING.md).
 - Add or update tests for behavior changes.
 - Update docs/changelog when user-facing behavior changes.
 - Include a short validation summary (commands run + key outcomes).
+
+For larger design changes, prefer opening an issue or draft PR first so scope and operator impact can be discussed before implementation.
 
 ## Reporting Security Issues
 

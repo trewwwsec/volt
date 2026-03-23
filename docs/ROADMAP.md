@@ -1,4 +1,4 @@
-# Subrecon Roadmap
+# Volt Roadmap
 
 Guiding principle: keep the tool small, transparent, and predictable. Prefer simple and elegant improvements over feature bloat.
 
@@ -12,7 +12,7 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
 
 ## Phase 2: Structure
 
-- Split `subrecon.py` into focused modules:
+- Split `volt.py` into focused modules:
   - `cli`
   - `models`
   - `sources` (ct/search/s3/tools)
@@ -21,8 +21,8 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
 - Status: complete.
   - Extracted `models` and `reporting` with no behavior change.
   - Extracted `sources/ct.py`, `sources/search.py`, `sources/storage.py`, `sources/takeover.py`, and `sources/tools.py`.
-  - Extracted `cli.py` (`build_parser` and `main`) while keeping compatibility wrappers in `subrecon.py`.
-  - Extracted `run_scan` orchestration into `cli.py` while keeping `subrecon.run_scan` as a compatibility wrapper.
+  - Extracted `cli.py` (`build_parser` and `main`) while keeping compatibility wrappers in `volt.py`.
+  - Extracted `run_scan` orchestration into `cli.py` while keeping `volt.run_scan` as a compatibility wrapper.
   - Extracted CLI/input helpers (`load_domains`, `parse_keywords`, `parse_search_providers`, `positive_int`) into `cli.py` with compatibility wrappers.
   - Extracted generic runtime helpers (`log`, `init_source_health`, `normalize_domain`, `check_tool`, `run_command`) into `core.py` with compatibility wrappers.
   - Extracted HTTP transport helper (`fetch_url`) into `networking.py` with wrapper injection preserving patched-test behavior.
@@ -31,8 +31,8 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
   - Extracted structured-output parsing/provenance helpers into `parsing.py` with compatibility wrappers.
   - Extracted search helper primitives into `sources/search.py` (dork/commoncrawl query builders, index discovery, result normalization, leak classification) with compatibility wrappers.
   - Extracted storage naming/wordlist helpers into `sources/storage.py` (S3 candidate extraction + Azure account/container helpers) with compatibility wrappers.
-  - Extracted static configuration constants into `constants.py` while preserving `subrecon` constant exports.
-  - Added canonical `models.py` and `reporting.py` modules; retained `subrecon_models.py`/`subrecon_reporting.py` as compatibility shims.
+  - Extracted static configuration constants into `constants.py` while preserving `volt` constant exports.
+  - Added canonical `models.py` and `reporting.py` modules; retained `volt_models.py`/`volt_reporting.py` as compatibility shims.
 
 ## Phase 3: Reliability
 
@@ -59,27 +59,16 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
 - Add linting/formatting checks via `uv run`.
 - Optionally add a lightweight CI workflow once local test/lint steps are stable.
 - Status: complete.
-  - Added CI workflow at `.github/workflows/ci.yml` running Ruff lint/format checks, static compile checks, and `uv run python -m unittest discover`.
+  - Added CI workflow at `.github/workflows/ci.yml` running Ruff lint/format checks, static compile checks, and unit-test discovery.
   - Added `ruff` dev dependency group and standardized local/CI lint+format checks on `uv run ruff ...`.
   - Expanded automated tests for edge-case parsing and partial-failure source-health transitions.
   - Added parser edge-case tests for S3/Azure error-code extraction fallbacks.
   - Added deterministic partial-failure simulation commands to `docs/TESTING.md`.
 
-## MVP Positioning Insight (March 22, 2026)
-
-- Current position: strong technical CLI MVP for security engineers.
-- Estimated readiness:
-  - MVP (engineer-facing CLI): `~8/10`
-  - Polished MVP (customer-facing): `~5.5/10`
-- Interpretation:
-  - Core detection/reporting pipeline is in good shape.
-  - Reliability and test gates are strong.
-  - Main remaining gap is productization and operator UX, not core scan logic.
-
 ## Phase 5: Productization (Next)
 
 - Make distribution first-class:
-  - Ship an installable package with a `subrecon` CLI entry point.
+  - Ship an installable package with a `volt` CLI entry point.
   - Move from script-first usage to command-first usage.
 - Stabilize default operator experience:
   - Default search provider to `commoncrawl`; keep `bing` opt-in.
@@ -94,19 +83,19 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
 
 ### Phase 5 Exit Criteria
 
-- Install + run path is one command (`uv tool`/`pipx`) with `subrecon --help`.
+- Install + run path is one command (`uv tool`/`pipx`) with `volt --help`.
 - First tagged release with versioned notes and upgrade guidance.
 - Operator docs include triage workflow for indexed-leak/cloud/takeover findings.
 - CI includes a non-blocking bounded live smoke job for upstream-source drift detection.
 
-### Phase 5: 8-Week Delivery Checkpoints
+### Delivery Checkpoints
 
 - Week 1: Product lock and acceptance criteria
   - Freeze customer-facing MVP scope and non-goals.
   - Define launch gates and map each gate to measurable checks.
   - Deliverable: `docs/ROADMAP.md` + release checklist updated with final gates.
 - Week 2: Distribution and install UX
-  - Ship installable package with `subrecon` console entrypoint.
+  - Ship installable package with `volt` console entrypoint.
   - Add `--version` and version source-of-truth.
   - Deliverable: install docs validated on clean environment (`pipx` and `uv tool`).
 - Week 3: Safe defaults and operator UX
@@ -134,11 +123,11 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
   - Triage blockers, cut release candidate, and make go/no-go decision.
   - Deliverable: `v1.0.0` tag if launch gates pass.
 
-### Milestone Issues (Ready To File)
+### Milestone Issues
 
 - Milestone `M5-A` (Weeks 1-2): Distribution Foundation
-  - Issue: Add installable package metadata and `subrecon` console entrypoint.
-    - Acceptance: `pipx install .` and `uv tool install .` both expose `subrecon --help`.
+  - Issue: Add installable package metadata and `volt` console entrypoint.
+    - Acceptance: `pipx install .` and `uv tool install .` both expose `volt --help`.
   - Issue: Add `--version` and centralized version management.
     - Acceptance: CLI reports project version and release process updates version in one place.
   - Issue: Add release checklist and first tagged release workflow.
@@ -162,14 +151,11 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
   - Issue: Run pilot and track launch gates.
     - Acceptance: pilot metrics recorded; go/no-go decision logged; `v1.0.0` tagged on pass.
 
-## Immediate Next Actions
+## Current Priorities
 
-1. Completed: Packaging + entrypoint + centralized `--version` workflow (Week 2).
-2. Completed: Week 3 operator UX hardening (deterministic degraded-source guidance + notes).
-3. Completed: Week 4 reliability hardening (report fixture regression + upstream drift tests).
-4. Completed: Week 6/7 docs foundations (`CONTRIBUTING.md`, `SUPPORT.md`, quickstart, triage playbook).
-5. Completed: Pilot runbook execution with bounded full matrix (`/tmp/subrecon-pilot-20260322-231020`) and launch-gate evidence capture.
-6. Next: Prepare release-candidate cut checklist refresh and finalize go/no-go log with latest search/amass caveats.
+1. Finalize the release-candidate checklist and launch criteria.
+2. Refresh live validation evidence before the next tagged release.
+3. Continue tightening operator UX around degraded-source handling and public documentation.
 
 ### S3: Completed High-Impact Improvements
 

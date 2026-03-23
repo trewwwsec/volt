@@ -81,6 +81,7 @@ Testing: [docs/TESTING.md](docs/TESTING.md)
 Release process: [docs/RELEASE.md](docs/RELEASE.md)
 Changelog: [CHANGELOG.md](CHANGELOG.md)
 Security policy: [SECURITY.md](SECURITY.md)
+Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 CI: `.github/workflows/ci.yml` (`push`/`pull_request`)
 Live smoke CI: `.github/workflows/live-smoke.yml` (`schedule`/`workflow_dispatch`, non-blocking)
 

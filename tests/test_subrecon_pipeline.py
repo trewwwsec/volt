@@ -219,6 +219,39 @@ class SubreconPipelineTest(unittest.TestCase):
             source_health["search"]["providers"]["bing"]["notes"], ["n1", "n2"]
         )
 
+    def test_normalize_source_health_adds_operator_guidance_for_degraded_statuses(
+        self,
+    ) -> None:
+        source_health = {
+            "ct": {
+                "status": "partial",
+                "errors": 1,
+                "timeouts": 1,
+                "findings": 0,
+                "notes": [],
+            }
+        }
+        subrecon.normalize_source_health(source_health)
+        notes = source_health["ct"]["notes"]
+        self.assertTrue(
+            any(
+                note.startswith("operator_action: source reliability is degraded")
+                for note in notes
+            )
+        )
+        self.assertTrue(
+            any("increase timeout budget" in note for note in notes),
+        )
+        self.assertTrue(
+            any("review error_types/error_samples" in note for note in notes),
+        )
+        self.assertTrue(
+            any(
+                "zero findings may reflect degraded source coverage" in note
+                for note in notes
+            ),
+        )
+
     def test_run_command_success_and_timeout(self) -> None:
         rc, stdout, stderr = subrecon.run_command(
             ["python3", "-c", "print('ok')"], timeout=2
@@ -1889,6 +1922,73 @@ class SubreconPipelineTest(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             subrecon.run_scan(args)
+
+    @patch("builtins.print")
+    @patch("subrecon.collect_subdomain_takeover_findings")
+    @patch("subrecon.collect_azure_blob_findings")
+    @patch("subrecon.collect_gcp_bucket_findings")
+    @patch("subrecon.collect_s3_bucket_findings")
+    @patch("subrecon.collect_search_index_findings")
+    @patch("subrecon.collect_ct_subdomains")
+    @patch("subrecon.collect_amass_subdomains")
+    @patch("subrecon.collect_subfinder_subdomains")
+    def test_run_scan_emits_source_health_warning_lines_when_degraded(
+        self,
+        mock_subfinder,
+        mock_amass,
+        mock_ct,
+        mock_search,
+        mock_s3,
+        mock_gcp,
+        mock_azure,
+        mock_takeover,
+        mock_print,
+    ) -> None:
+        mock_subfinder.return_value = (set(), [])
+        mock_amass.return_value = (set(), [])
+        mock_search.return_value = (set(), [])
+        mock_s3.return_value = []
+        mock_gcp.return_value = []
+        mock_azure.return_value = []
+        mock_takeover.return_value = []
+
+        def fake_ct(_context, health):
+            health["status"] = "partial"
+            health["errors"] = 1
+            health["timeouts"] = 0
+            health["findings"] = 0
+            health["notes"].append("ct upstream unavailable")
+            return set(), []
+
+        mock_ct.side_effect = fake_ct
+
+        args = argparse.Namespace(
+            domain="example.com",
+            domain_list=None,
+            output="/tmp/ignored.json",
+            organization=None,
+            keywords=None,
+            search_providers="commoncrawl",
+            timeout=5,
+            tool_timeout=30,
+            threads=2,
+            verbose=False,
+            max_bucket_candidates=40,
+            s3_list_probe=False,
+            no_ct=False,
+            no_subfinder=True,
+            no_amass=True,
+            no_search=True,
+            no_s3=True,
+            no_gcp=True,
+            no_azure=True,
+            no_takeover=True,
+        )
+        subrecon.run_scan(args)
+
+        printed = "\n".join(str(call.args[0]) for call in mock_print.call_args_list)
+        self.assertIn("[!] Source reliability warnings:", printed)
+        self.assertIn("[health] ct: status=partial errors=1 timeouts=0", printed)
 
 
 if __name__ == "__main__":

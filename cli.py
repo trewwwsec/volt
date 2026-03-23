@@ -232,6 +232,40 @@ def build_parser(
     return parser
 
 
+def build_source_health_warning_lines(
+    source_health: dict[str, dict[str, Any]],
+) -> list[str]:
+    degraded_lines: list[str] = []
+    for source_name in sorted(source_health):
+        stats = source_health.get(source_name, {})
+        status = str(stats.get("status", "")).strip().lower()
+        if status not in {"partial", "error"}:
+            continue
+        errors = int(stats.get("errors", 0))
+        timeouts = int(stats.get("timeouts", 0))
+        line = (
+            f"[health] {source_name}: status={status} "
+            f"errors={errors} timeouts={timeouts}"
+        )
+        notes = stats.get("notes")
+        if isinstance(notes, list) and notes:
+            first_note = str(notes[0]).strip()
+            if first_note:
+                line = f"{line} note={first_note}"
+        degraded_lines.append(line)
+
+    if not degraded_lines:
+        return []
+    return [
+        "[!] Source reliability warnings:",
+        *[f"    {line}" for line in degraded_lines],
+        (
+            "    [health] treat no-findings from degraded sources as "
+            "inconclusive until rerun"
+        ),
+    ]
+
+
 def run_scan(
     args: argparse.Namespace,
     *,
@@ -410,6 +444,8 @@ def run_scan(
 
     findings = dedupe_findings(findings)
     normalize_source_health(source_health)
+    for line in build_source_health_warning_lines(source_health):
+        print(line)
 
     legal_notes = [
         "No direct port scanning or exploitation performed.",

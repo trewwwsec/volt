@@ -53,8 +53,36 @@ def record_source_error(
     samples.append(sample)
 
 
+def _add_operator_guidance_notes(stats: dict[str, Any]) -> None:
+    notes = stats.setdefault("notes", [])
+    if not isinstance(notes, list):
+        return
+
+    status = str(stats.get("status", "")).strip().lower()
+    if status not in {"partial", "error"}:
+        return
+
+    notes.append(
+        "operator_action: source reliability is degraded; validate this module before relying on negative results"
+    )
+    if int(stats.get("timeouts", 0)) > 0:
+        notes.append(
+            "operator_action: increase timeout budget (--timeout for HTTP probes, --tool-timeout for passive tools) and rerun"
+        )
+    if int(stats.get("errors", 0)) > 0:
+        notes.append(
+            "operator_action: review error_types/error_samples for root cause and rerun"
+        )
+    if int(stats.get("findings", 0)) == 0:
+        notes.append(
+            "operator_action: zero findings may reflect degraded source coverage, not absence of exposure"
+        )
+
+
 def normalize_source_health(source_health: dict[str, dict[str, Any]]) -> None:
     for stats in source_health.values():
+        _add_operator_guidance_notes(stats)
+
         notes = stats.get("notes")
         if isinstance(notes, list):
             stats["notes"] = sorted(

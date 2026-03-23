@@ -189,6 +189,8 @@ Top-level report fields:
 
 `source_health` tracks module reliability for the run (status, queries, errors, timeouts, and counts). Use this to distinguish "no findings" from "source unavailable/partial".
 
+When any source finishes in `partial` or `error`, `subrecon` now prints a deterministic end-of-run reliability warning block and includes `operator_action:` guidance notes in that source's `source_health.notes` field.
+
 Common status values:
 
 - `ok`

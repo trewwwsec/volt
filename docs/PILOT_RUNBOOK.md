@@ -2,6 +2,8 @@
 
 Use this runbook to execute a bounded customer pilot and make a launch go/no-go decision.
 
+Use [docs/PILOT_LOG_TEMPLATE.md](PILOT_LOG_TEMPLATE.md) to capture metrics consistently.
+
 ## 1. Preconditions
 
 - Authorized target list approved.
@@ -69,4 +71,3 @@ No-go:
 1. Convert defects and enhancements into tracked issues.
 2. Update `CHANGELOG.md` and release notes.
 3. Re-run deterministic + bounded live-smoke checks before final tag.
-

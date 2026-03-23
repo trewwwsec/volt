@@ -10,7 +10,7 @@ Run all tests:
 uv run python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Current baseline (March 22, 2026): `108` tests passing.
+Current baseline (March 22, 2026): `109` tests passing.
 
 CI gate:
 
@@ -33,6 +33,7 @@ Current suite covers:
 - Bing and Common Crawl search parsing paths and leak classification
 - Common Crawl index-failure fallback to Bing with degraded (`partial`) source-health semantics
 - CT JSON parsing path
+- CT fallback path (`crt.sh` -> Cert Spotter) with degraded (`partial`) source-health semantics
 - S3 `HEAD` + fallback `ListObjectsV2` classification path
 - S3 candidate validation filtering (reserved/invalid names), region-aware probe wiring, optional website probe path, and probe-retry override
 - GCS candidate validation filtering, domain-style candidate generation, XML error-code classification, second-phase object probe, optional dual-endpoint fallback, and probe-retry override

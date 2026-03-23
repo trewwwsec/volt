@@ -8,6 +8,49 @@ from core import record_source_error
 from models import Evidence, Finding, ScanContext
 
 
+def _fetch_crtsh_rows(
+    domain: str,
+    timeout: int,
+    *,
+    fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
+) -> tuple[list[dict[str, Any]] | None, str | None]:
+    query = parse.quote(f"%.{domain}")
+    url = f"https://crt.sh/?q={query}&output=json"
+    status, body, _ = fetch_url(url, timeout=timeout)
+    if status != 200 or not body.strip():
+        return None, f"http_{status}"
+    try:
+        rows = json.loads(body)
+    except json.JSONDecodeError:
+        return None, "json_decode"
+    if not isinstance(rows, list):
+        return None, "json_schema"
+    return rows, None
+
+
+def _fetch_certspotter_rows(
+    domain: str,
+    timeout: int,
+    *,
+    fetch_url: Callable[..., tuple[int, str, dict[str, str]]],
+) -> tuple[list[dict[str, Any]] | None, str | None]:
+    encoded = parse.quote(domain)
+    url = (
+        "https://api.certspotter.com/v1/issuances"
+        f"?domain={encoded}&include_subdomains=true&expand=dns_names"
+    )
+    status, body, _ = fetch_url(url, timeout=timeout)
+    if status != 200 or not body.strip():
+        return None, f"certspotter_http_{status}"
+    try:
+        rows = json.loads(body)
+    except json.JSONDecodeError:
+        return None, "certspotter_json_decode"
+    if not isinstance(rows, list):
+        return None, "certspotter_json_schema"
+    return rows, None
+
+
 def collect_ct_subdomains(
     context: ScanContext,
     stats: dict[str, Any],
@@ -21,42 +64,54 @@ def collect_ct_subdomains(
 
     for domain in context.domains:
         stats["queried"] += 1
-        query = parse.quote(f"%.{domain}")
-        url = f"https://crt.sh/?q={query}&output=json"
+        rows, crt_error = _fetch_crtsh_rows(
+            domain, context.timeout, fetch_url=fetch_url
+        )
+        row_source = "crt.sh"
 
-        status, body, _ = fetch_url(url, timeout=context.timeout)
-        if status != 200 or not body.strip():
+        if crt_error:
             record_source_error(
                 stats,
-                f"http_{status}",
+                crt_error,
                 detail=f"domain={domain} query=crt.sh",
             )
-            log(f"[ct] {domain}: no data (status={status})", context.verbose)
-            continue
+            log(f"[ct] {domain}: primary source failed ({crt_error})", context.verbose)
 
-        try:
-            rows = json.loads(body)
-        except json.JSONDecodeError:
-            record_source_error(
-                stats,
-                "json_decode",
-                detail=f"domain={domain} query=crt.sh",
+            stats["queried"] += 1
+            rows, certspotter_error = _fetch_certspotter_rows(
+                domain, context.timeout, fetch_url=fetch_url
             )
-            log(f"[ct] {domain}: failed to parse ct json", context.verbose)
-            continue
-        if not isinstance(rows, list):
-            record_source_error(
-                stats,
-                "json_schema",
-                detail=f"domain={domain} query=crt.sh",
-            )
-            log(f"[ct] {domain}: unexpected ct json schema", context.verbose)
+            row_source = "certspotter"
+            if certspotter_error:
+                record_source_error(
+                    stats,
+                    certspotter_error,
+                    detail=f"domain={domain} query=certspotter",
+                )
+                log(
+                    f"[ct] {domain}: fallback source failed ({certspotter_error})",
+                    context.verbose,
+                )
+                continue
+            fallback_note = "crt.sh degraded; certspotter fallback used"
+            stats["notes"].append(fallback_note)
+            log(f"[ct] {domain}: {fallback_note}", context.verbose)
+
+        if not rows:
             continue
 
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            names = str(row.get("name_value", "")).splitlines()
+            names: list[str] = []
+            if row_source == "crt.sh":
+                names = str(row.get("name_value", "")).splitlines()
+            else:
+                dns_names = row.get("dns_names")
+                if isinstance(dns_names, list):
+                    names = [str(item) for item in dns_names]
+                elif isinstance(dns_names, str):
+                    names = [dns_names]
             for name in names:
                 host = normalize_domain(name.replace("*.", ""))
                 if not host:

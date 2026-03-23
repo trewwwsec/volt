@@ -344,18 +344,66 @@ class SubreconPipelineTest(unittest.TestCase):
     def test_collect_ct_subdomains_partial_when_some_domains_fail(
         self, mock_fetch_url
     ) -> None:
-        mock_fetch_url.side_effect = [
-            (500, "", {}),
-            (200, '[{"name_value":"ok.example.org"}]', {}),
-        ]
+        def fake_fetch(
+            url: str,
+            timeout: int,
+            method: str = "GET",
+            headers: Optional[dict[str, str]] = None,
+            retries: int = 0,
+        ) -> tuple[int, str, dict[str, str]]:
+            del timeout, method, headers, retries
+            if "crt.sh" in url and "example.com" in url:
+                return (500, "", {})
+            if "api.certspotter.com" in url and "domain=example.com" in url:
+                return (200, '[{"dns_names":["ok.example.com"]}]', {})
+            if "crt.sh" in url and "example.org" in url:
+                return (200, '[{"name_value":"ok.example.org"}]', {})
+            return (0, "", {})
+
+        mock_fetch_url.side_effect = fake_fetch
         ctx = self._default_context()
         ctx.domains = ["example.com", "example.org"]
         health = subrecon.init_source_health("crt.sh")
         hosts, findings = subrecon.collect_ct_subdomains(ctx, health)
-        self.assertEqual(hosts, {"ok.example.org"})
-        self.assertEqual(len(findings), 1)
+        self.assertEqual(hosts, {"ok.example.com", "ok.example.org"})
+        self.assertEqual(len(findings), 2)
         self.assertEqual(health["errors"], 1)
         self.assertEqual(health["status"], "partial")
+
+    @patch("subrecon.fetch_url")
+    def test_collect_ct_subdomains_uses_certspotter_fallback_on_crt_failure(
+        self, mock_fetch_url
+    ) -> None:
+        def fake_fetch(
+            url: str,
+            timeout: int,
+            method: str = "GET",
+            headers: Optional[dict[str, str]] = None,
+            retries: int = 0,
+        ) -> tuple[int, str, dict[str, str]]:
+            del timeout, method, headers
+            if "crt.sh" in url:
+                return (503, "", {})
+            if "api.certspotter.com" in url:
+                return (
+                    200,
+                    '[{"dns_names":["a.example.com","*.b.example.com","evil.com"]}]',
+                    {},
+                )
+            return (0, "", {})
+
+        mock_fetch_url.side_effect = fake_fetch
+        ctx = self._default_context()
+        ctx.domains = ["example.com"]
+        health = subrecon.init_source_health("crt.sh")
+        hosts, findings = subrecon.collect_ct_subdomains(ctx, health)
+        self.assertEqual(hosts, {"a.example.com", "b.example.com"})
+        self.assertEqual(len(findings), 2)
+        self.assertEqual(health["status"], "partial")
+        self.assertEqual(health["errors"], 1)
+        self.assertIn("crt.sh degraded; certspotter fallback used", health["notes"])
+        retries = [call.kwargs.get("retries") for call in mock_fetch_url.call_args_list]
+        self.assertTrue(all(value == subrecon.CT_HTTP_RETRIES for value in retries))
 
     @patch("subrecon.fetch_url")
     def test_collect_search_index_findings_filters_to_target_domain(

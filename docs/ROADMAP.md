@@ -164,9 +164,12 @@ Guiding principle: keep the tool small, transparent, and predictable. Prefer sim
 
 ## Immediate Next Actions
 
-1. Open `M5-A` issues and assign owners/due dates this week.
-2. Implement packaging + entrypoint + `--version` before changing additional scan logic.
-3. Start Week 3 defaults/doc changes immediately after install UX is verified on a clean environment.
+1. Completed: Packaging + entrypoint + centralized `--version` workflow (Week 2).
+2. Completed: Week 3 operator UX hardening (deterministic degraded-source guidance + notes).
+3. Completed: Week 4 reliability hardening (report fixture regression + upstream drift tests).
+4. Completed: Week 6/7 docs foundations (`CONTRIBUTING.md`, `SUPPORT.md`, quickstart, triage playbook).
+5. Next: Execute pilot runbook on authorized targets and capture launch-gate metrics.
+6. Next: Prepare release candidate cut checklist and finalize go/no-go decision log.
 
 ### S3: High-Impact Improvements To Prioritize Next
 

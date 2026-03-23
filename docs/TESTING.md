@@ -10,7 +10,7 @@ Run all tests:
 uv run python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Current baseline (March 22, 2026): `109` tests passing.
+Current baseline (March 22, 2026): `111` tests passing.
 
 CI gate:
 
@@ -32,6 +32,7 @@ Current suite covers:
 - Amass compatibility fallback paths (`-src` -> no-`-src`, `-json` -> plain-output parsing)
 - Bing and Common Crawl search parsing paths and leak classification
 - Common Crawl index-failure fallback to Bing with degraded (`partial`) source-health semantics
+- Common Crawl endpoint selection and filter-compatibility fallback behavior (`filter==status:200` with retry fallback)
 - CT JSON parsing path
 - CT fallback path (`crt.sh` -> Cert Spotter) with degraded (`partial`) source-health semantics
 - S3 `HEAD` + fallback `ListObjectsV2` classification path

@@ -83,18 +83,45 @@ def fetch_commoncrawl_index_endpoint(
         return None
     if not isinstance(rows, list):
         return None
+    ranked_candidates: list[tuple[tuple[int, int], str]] = []
+    unranked_candidates: list[str] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
-        endpoint = row.get("cdx-api")
-        if isinstance(endpoint, str) and endpoint.startswith("http"):
-            return endpoint.rstrip("/")
+        endpoint = ""
+        cdx_api = row.get("cdx-api")
+        if isinstance(cdx_api, str) and cdx_api.startswith("http"):
+            endpoint = cdx_api.rstrip("/")
         identifier = row.get("id")
-        if isinstance(identifier, str) and identifier.strip():
+        if not endpoint and isinstance(identifier, str) and identifier.strip():
             suffix = (
                 identifier if identifier.endswith("-index") else f"{identifier}-index"
             )
-            return f"https://index.commoncrawl.org/{suffix}"
+            endpoint = f"https://index.commoncrawl.org/{suffix}"
+        if not endpoint:
+            continue
+
+        collection_id = ""
+        if isinstance(identifier, str):
+            collection_id = identifier.strip()
+        if not collection_id:
+            match = re.search(r"/(CC-MAIN-(\d{4})-(\d{2}))-index/?$", endpoint)
+            if match:
+                collection_id = match.group(1)
+
+        match = re.match(r"^CC-MAIN-(\d{4})-(\d{2})$", collection_id)
+        if match:
+            ranked_candidates.append(
+                ((int(match.group(1)), int(match.group(2))), endpoint)
+            )
+        else:
+            unranked_candidates.append(endpoint)
+
+    if ranked_candidates:
+        ranked_candidates.sort(key=lambda item: item[0], reverse=True)
+        return ranked_candidates[0][1]
+    if unranked_candidates:
+        return unranked_candidates[0]
     return None
 
 
@@ -108,21 +135,35 @@ def fetch_commoncrawl_results(
     iter_json_records: Callable[[str], list[dict[str, Any]]],
     quote_plus: Callable[[str], str],
 ) -> tuple[int, list[dict[str, str]], str]:
-    url = f"{index_endpoint}?url={quote_plus(pattern)}&output=json&fl=url&limit={limit}"
-    status, body, _ = fetch_url(url, timeout=timeout)
+    filtered_url = (
+        f"{index_endpoint}?url={quote_plus(pattern)}&output=json&fl=url,status,mime"
+        f"&limit={limit}&filter==status:200"
+    )
+    status, body, _ = fetch_url(filtered_url, timeout=timeout)
+    query_url = filtered_url
+    if status in {400, 422}:
+        query_url = (
+            f"{index_endpoint}?url={quote_plus(pattern)}&output=json&fl=url&limit={limit}"
+        )
+        status, body, _ = fetch_url(query_url, timeout=timeout)
     if status != 200 or not body:
-        return status, [], url
+        return status, [], query_url
     results: list[dict[str, str]] = []
     seen: set[str] = set()
     for row in iter_json_records(body):
         target = row.get("url")
         if not isinstance(target, str) or not target:
             continue
+        record_status = row.get("status")
+        if isinstance(record_status, str) and record_status != "200":
+            continue
+        if isinstance(record_status, int) and record_status != 200:
+            continue
         if target in seen:
             continue
         seen.add(target)
         results.append({"url": target, "title": "", "snippet": ""})
-    return status, results, url
+    return status, results, query_url
 
 
 def classify_leak(url: str, snippet: str) -> tuple[str, str, str, list[str]]:

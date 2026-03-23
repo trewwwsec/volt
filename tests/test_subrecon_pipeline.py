@@ -1793,6 +1793,26 @@ class SubreconPipelineTest(unittest.TestCase):
         )
 
     @patch("subrecon.fetch_url")
+    def test_fetch_commoncrawl_index_endpoint_prefers_newest_cc_main(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.return_value = (
+            200,
+            json.dumps(
+                [
+                    {"id": "CC-MAIN-2024-20"},
+                    {"id": "CC-MAIN-2026-05"},
+                    {"id": "CC-MAIN-2025-50"},
+                ]
+            ),
+            {},
+        )
+        endpoint = subrecon.fetch_commoncrawl_index_endpoint(timeout=5)
+        self.assertEqual(
+            endpoint, "https://index.commoncrawl.org/CC-MAIN-2026-05-index"
+        )
+
+    @patch("subrecon.fetch_url")
     def test_fetch_commoncrawl_results_dedupes_duplicate_urls(
         self, mock_fetch_url
     ) -> None:
@@ -1819,6 +1839,24 @@ class SubreconPipelineTest(unittest.TestCase):
             ["https://a.example.com/.env", "https://b.example.com/.sql"],
         )
         self.assertIn("output=json", query_url)
+        self.assertIn("filter==status:200", query_url)
+
+    @patch("subrecon.fetch_url")
+    def test_fetch_commoncrawl_results_falls_back_when_filter_not_supported(
+        self, mock_fetch_url
+    ) -> None:
+        mock_fetch_url.side_effect = [
+            (422, "", {}),
+            (200, '{"url":"https://a.example.com/.env"}\n', {}),
+        ]
+        status, results, query_url = subrecon.fetch_commoncrawl_results(
+            "https://index.commoncrawl.org/CC-MAIN-2026-10-index",
+            "*.example.com/*.env",
+            timeout=5,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(len(results), 1)
+        self.assertNotIn("filter==status:200", query_url)
 
     def test_build_parser_rejects_non_positive_numeric_flags(self) -> None:
         parser = subrecon.build_parser()

@@ -44,8 +44,18 @@ def collect_ct_subdomains(
             )
             log(f"[ct] {domain}: failed to parse ct json", context.verbose)
             continue
+        if not isinstance(rows, list):
+            record_source_error(
+                stats,
+                "json_schema",
+                detail=f"domain={domain} query=crt.sh",
+            )
+            log(f"[ct] {domain}: unexpected ct json schema", context.verbose)
+            continue
 
         for row in rows:
+            if not isinstance(row, dict):
+                continue
             names = str(row.get("name_value", "")).splitlines()
             for name in names:
                 host = normalize_domain(name.replace("*.", ""))

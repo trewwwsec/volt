@@ -202,17 +202,28 @@ def collect_search_index_findings(
 
     commoncrawl_index = None
     if "commoncrawl" in context.search_providers:
-        commoncrawl_index = fetch_commoncrawl_index_endpoint(context.timeout)
+        index_exception = False
+        try:
+            commoncrawl_index = fetch_commoncrawl_index_endpoint(context.timeout)
+        except Exception:
+            index_exception = True
+            commoncrawl_index = None
         if not commoncrawl_index:
             provider_stats["commoncrawl"]["status"] = "error"
             provider_stats["commoncrawl"]["errors"] += 1
             provider_stats["commoncrawl"]["queries"] += 1
-            index_note = "failed to resolve Common Crawl index endpoint"
+            index_note = (
+                "exception while resolving Common Crawl index endpoint"
+                if index_exception
+                else "failed to resolve Common Crawl index endpoint"
+            )
             provider_stats["commoncrawl"]["notes"].append(index_note)
             stats["notes"].append(index_note)
             record_source_error(
                 stats,
-                "commoncrawl_index_unavailable",
+                "commoncrawl_index_exception"
+                if index_exception
+                else "commoncrawl_index_unavailable",
                 detail=index_note,
             )
 
@@ -241,7 +252,23 @@ def collect_search_index_findings(
                     )
                     continue
 
-                results = parse_bing_results(body)
+                try:
+                    results = parse_bing_results(body)
+                except Exception:
+                    provider_stats["bing"]["errors"] += 1
+                    provider_stats["bing"]["notes"].append(
+                        f"domain={domain} query={category} parse_error"
+                    )
+                    record_source_error(
+                        stats,
+                        "bing_parse_error",
+                        detail=f"domain={domain} query={category}",
+                    )
+                    log(
+                        f"[search] provider=bing {domain} query='{query}' parse error",
+                        context.verbose,
+                    )
+                    continue
                 provider_stats["bing"]["results"] += len(results)
                 log(
                     f"[search] provider=bing {domain} query='{category}' results={len(results)}",
@@ -285,9 +312,26 @@ def collect_search_index_findings(
             for pattern, category in build_commoncrawl_patterns(domain):
                 provider_stats["commoncrawl"]["queries"] += 1
                 stats["queried"] += 1
-                status, results, query_url = fetch_commoncrawl_results(
-                    commoncrawl_index, pattern, context.timeout
-                )
+                try:
+                    status, results, query_url = fetch_commoncrawl_results(
+                        commoncrawl_index, pattern, context.timeout
+                    )
+                except Exception:
+                    provider_stats["commoncrawl"]["errors"] += 1
+                    provider_stats["commoncrawl"]["notes"].append(
+                        f"domain={domain} query={category} exception"
+                    )
+                    record_source_error(
+                        stats,
+                        "commoncrawl_query_exception",
+                        detail=f"domain={domain} query={category}",
+                    )
+                    log(
+                        f"[search] provider=commoncrawl {domain} pattern='{pattern}' "
+                        "exception during query",
+                        context.verbose,
+                    )
+                    continue
                 if status != 200:
                     provider_stats["commoncrawl"]["errors"] += 1
                     provider_stats["commoncrawl"]["notes"].append(

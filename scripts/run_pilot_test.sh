@@ -133,9 +133,40 @@ echo "[*] running bounded live matrix..."
 run_case core_e2e_iana \
   uv run subrecon -d iana.org --no-subfinder --no-amass
 
-run_case s3_only_noaa_goes19 \
-  uv run subrecon -d noaa-goes19.test --keywords noaa-goes19 \
-  --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover
+echo "[*] selecting S3 canary target..."
+S3_CANARY_JSON="$OUT_DIR/s3_canary_selection.json"
+if uv run python scripts/select_s3_canary.py --json > "$S3_CANARY_JSON"; then
+  S3_CANARY_BUCKET="$(
+    uv run python - <<'PY' "$S3_CANARY_JSON"
+import json
+import sys
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+selected = payload.get("selected") or {}
+print(selected.get("bucket", ""))
+PY
+  )"
+  if [[ -n "$S3_CANARY_BUCKET" ]]; then
+    echo "[*] selected S3 canary bucket: $S3_CANARY_BUCKET"
+    echo "$S3_CANARY_BUCKET" > "$OUT_DIR/s3_canary_bucket.txt"
+    run_case s3_only_canary \
+      uv run subrecon -d "${S3_CANARY_BUCKET}.test" --keywords "$S3_CANARY_BUCKET" \
+      --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover
+  else
+    echo "[!] selector returned empty S3 canary bucket; using negative-control bucket case"
+    S3_NEGATIVE_BUCKET="subrecon-negative-s3-$(date +%s)"
+    echo "$S3_NEGATIVE_BUCKET" > "$OUT_DIR/s3_negative_bucket.txt"
+    run_case s3_only_negative_control \
+      uv run subrecon -d "${S3_NEGATIVE_BUCKET}.test" --keywords "$S3_NEGATIVE_BUCKET" \
+      --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover
+  fi
+else
+  echo "[!] no viable S3 canary target resolved; using negative-control bucket case"
+  S3_NEGATIVE_BUCKET="subrecon-negative-s3-$(date +%s)"
+  echo "$S3_NEGATIVE_BUCKET" > "$OUT_DIR/s3_negative_bucket.txt"
+  run_case s3_only_negative_control \
+    uv run subrecon -d "${S3_NEGATIVE_BUCKET}.test" --keywords "$S3_NEGATIVE_BUCKET" \
+    --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover
+fi
 
 run_case gcs_only_landsat \
   uv run subrecon -d gcp-public-data.test --keywords gcp-public-data-landsat \
@@ -177,6 +208,10 @@ for report in sorted(out_dir.glob("*.json")):
         data = json.loads(report.read_text(encoding="utf-8"))
     except Exception as exc:
         summary[report.name] = {"status": "unreadable", "error": str(exc)}
+        continue
+    if not isinstance(data, dict):
+        continue
+    if "source_health" not in data or "summary" not in data:
         continue
     src = data.get("source_health", {})
     status_map = {k: v.get("status", "unknown") for k, v in sorted(src.items())}

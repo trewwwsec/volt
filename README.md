@@ -103,7 +103,9 @@ uv run subrecon -d example.com -o perimeter_report.json
 ### S3-focused check (high signal)
 
 ```bash
-uv run subrecon -d example.com --keywords noaa-goes19 --no-ct --no-search --no-subfinder --no-amass --no-gcp --no-azure -o s3_report.json
+S3_CANARY="$(uv run python scripts/select_s3_canary.py || true)"
+S3_TARGET="${S3_CANARY:-subrecon-negative-s3-$(date +%s)}"
+uv run subrecon -d "${S3_TARGET}.test" --keywords "$S3_TARGET" --no-ct --no-search --no-subfinder --no-amass --no-gcp --no-azure -o s3_report.json
 ```
 
 ### Takeover-focused check

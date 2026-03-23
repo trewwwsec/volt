@@ -81,8 +81,10 @@ uv run subrecon -d example.com --no-search --no-s3 --no-gcp --no-azure --no-subf
 # Search only (stable MVP provider)
 uv run subrecon -d example.com --search-providers commoncrawl --no-ct --no-subfinder --no-amass --no-s3 --no-gcp --no-azure --no-takeover -o /tmp/subrecon_search_smoke.json
 
-# S3 only (known public bucket signal)
-uv run subrecon -d noaa-goes19.test --keywords noaa-goes19 --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover -o /tmp/subrecon_s3_smoke.json
+# S3 only (auto-select live canary; fallback to deterministic negative control)
+S3_CANARY="$(uv run python scripts/select_s3_canary.py || true)"
+S3_TARGET="${S3_CANARY:-subrecon-negative-s3-$(date +%s)}"
+uv run subrecon -d "${S3_TARGET}.test" --keywords "$S3_TARGET" --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover -o /tmp/subrecon_s3_smoke.json
 
 # GCS bucket only (existence/listability signal)
 uv run subrecon -d gcp-public-data.test --keywords gcp-public-data-landsat --no-ct --no-subfinder --no-amass --no-search --no-s3 --no-azure --no-takeover -o /tmp/subrecon_gcp_smoke.json
@@ -109,7 +111,7 @@ Environment: local macOS runner, passive internet-reachable execution.
 
 - CT-only (`/tmp/subrecon_ct_smoke.json`): `source_health.ct.status=ok`, `summary.total_findings=6`
 - Search-only Common Crawl (`/tmp/subrecon_search_smoke.json`): `source_health.search.status=partial`, `summary.total_findings=4`
-- S3-only (`/tmp/subrecon_s3_smoke.json`): `source_health.s3.status=ok`, `s3.ambiguous=0`, `summary.total_findings=1` (`noaa-goes19`)
+- S3-only (`/tmp/subrecon_s3_smoke.json`): `source_health.s3.status=ok|ok_no_results`; target selected by `scripts/select_s3_canary.py` (or deterministic negative-control fallback if no viable canary resolves)
 - GCS-only (`/tmp/subrecon_gcp_smoke.json`): `source_health.gcp.status=ok`, `summary.total_findings=2`
 - Azure direct probe (`check_single_azure_blob_container`): `status=200`, `existence=confirmed_public` on `azureopendatastorage/nyctlc` with default retries and `azure_probe_retries=1`
 - Takeover-focused (`/tmp/subrecon_takeover_smoke.json`): run as CT+takeover (`--no-subfinder --no-amass`) to keep runtime bounded; `source_health.takeover.status=ok_no_results`, `summary.total_findings=6` (CT inventory findings)
@@ -128,8 +130,10 @@ uv run subrecon -d iana.org --no-search --no-s3 --no-gcp --no-azure --no-subfind
 # Search only (Common Crawl)
 uv run subrecon -d iana.org --search-providers commoncrawl --no-ct --no-subfinder --no-amass --no-s3 --no-gcp --no-azure --no-takeover -o /tmp/subrecon_live3_search_only_iana.json
 
-# S3 only
-uv run subrecon -d noaa-goes19.test --keywords noaa-goes19 --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover -o /tmp/subrecon_live3_s3_only.json
+# S3 only (auto-select live canary; fallback to deterministic negative control)
+S3_CANARY="$(uv run python scripts/select_s3_canary.py || true)"
+S3_TARGET="${S3_CANARY:-subrecon-negative-s3-$(date +%s)}"
+uv run subrecon -d "${S3_TARGET}.test" --keywords "$S3_TARGET" --no-ct --no-subfinder --no-amass --no-search --no-gcp --no-azure --no-takeover -o /tmp/subrecon_live3_s3_only.json
 
 # GCS only
 uv run subrecon -d gcp-public-data.test --keywords gcp-public-data-landsat --no-ct --no-subfinder --no-amass --no-search --no-s3 --no-azure --no-takeover -o /tmp/subrecon_live3_gcp_only.json
@@ -157,7 +161,7 @@ Environment: local macOS runner, passive internet-reachable execution.
 - Core E2E (`/tmp/subrecon_live3_core_e2e_iana.json`): `source_health.ct=ok`, `search=partial`, `s3=ok`, `gcp=ok`, `azure=ok_no_results`, `takeover=ok_no_results`, `summary.total_findings=78`
 - CT-only (`/tmp/subrecon_live3_ct_only_iana.json`): `source_health.ct=error`, `error_types.http_0=1`, `summary.total_findings=0` (transient upstream/network failure)
 - Search-only Common Crawl (`/tmp/subrecon_live3_search_only_iana.json`): `source_health.search=partial`, `error_types.commoncrawl_http_404=3`, `summary.total_findings=16`
-- S3-only (`/tmp/subrecon_live3_s3_only.json`): `source_health.s3=ok`, `summary.total_findings=1`
+- S3-only (`/tmp/subrecon_live3_s3_only.json`): `source_health.s3=ok|ok_no_results`; target selected by `scripts/select_s3_canary.py` (or deterministic negative-control fallback)
 - GCS-only (`/tmp/subrecon_live3_gcp_only.json`): `source_health.gcp=ok`, `summary.total_findings=2`
 - Takeover+CT (`/tmp/subrecon_live3_takeover_ct_iana.json`): `ct=ok`, `takeover=ok_no_results`, `summary.total_findings=21`
 - Subfinder-only (`/tmp/subrecon_live3_subfinder_only_iana.json`): `source_health.subfinder=ok`, `summary.total_findings=65`

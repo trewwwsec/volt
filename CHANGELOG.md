@@ -25,6 +25,7 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 - Default search provider set to `commoncrawl`; `bing` remains optional/best-effort via `--search-providers`.
 - Search reliability hardened: when Common Crawl index discovery fails, search now auto-runs Bing fallback queries and reports degraded coverage as `partial` (instead of a hard `error` when fallback coverage succeeds).
 - CT reliability hardened: when `crt.sh` is unavailable or returns invalid responses, CT collection now falls back to Cert Spotter API while preserving degraded source-health telemetry.
+- S3 live-testing reliability hardened with dynamic canary selection (`scripts/select_s3_canary.py`) and negative-control fallback when known public targets are stale/unavailable.
 - Testing docs updated to command-first usage (`uv run subrecon`) and refreshed baseline/snapshot notes.
 - Degraded `source_health` states (`partial`/`error`) now add deterministic `operator_action` notes and emit a concise terminal reliability warning block.
 - Added deterministic run-scan report fixture coverage to catch schema/output drift in CI.

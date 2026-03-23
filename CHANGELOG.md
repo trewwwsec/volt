@@ -19,6 +19,7 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 - Testing docs updated to command-first usage (`uv run subrecon`) and refreshed baseline/snapshot notes.
 - Degraded `source_health` states (`partial`/`error`) now add deterministic `operator_action` notes and emit a concise terminal reliability warning block.
 - Added deterministic run-scan report fixture coverage to catch schema/output drift in CI.
+- Hardened CT/search collectors against upstream schema/parser drift by handling malformed JSON shapes and provider helper exceptions without crashing.
 
 ## [0.1.0] - 2026-03-22
 

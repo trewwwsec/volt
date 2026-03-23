@@ -10,7 +10,7 @@ Run all tests:
 uv run python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Current baseline (March 22, 2026): `102` tests passing.
+Current baseline (March 22, 2026): `107` tests passing.
 
 CI gate:
 
@@ -45,6 +45,7 @@ Current suite covers:
 - Source-health report block generation
 - Structured source-health error telemetry (`error_types`, `error_samples`) and normalization
 - Deterministic run-scan report fixture regression (`tests/fixtures/run_scan_reference_fixture.json`)
+- Upstream drift reliability guards for CT/search parsing and provider exception paths
 - `run_scan` orchestration with mocked source modules
 - Command runner success/timeout behavior
 - Amass timeout retry/fallback reliability transitions (`ok_no_results` and timeout-only `partial`)

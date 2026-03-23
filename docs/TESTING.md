@@ -66,6 +66,12 @@ uv run python -m unittest tests.test_subrecon_pipeline.SubreconPipelineTest.test
 
 These rely on network and external source availability:
 
+One-command harness:
+
+```bash
+scripts/run_pilot_test.sh --mode quick
+```
+
 ```bash
 # CT only
 uv run subrecon -d example.com --no-search --no-s3 --no-gcp --no-azure --no-subfinder --no-amass -o /tmp/subrecon_ct_smoke.json

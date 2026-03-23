@@ -4,6 +4,18 @@ Use this runbook to execute a bounded customer pilot and make a launch go/no-go 
 
 Use [docs/PILOT_LOG_TEMPLATE.md](PILOT_LOG_TEMPLATE.md) to capture metrics consistently.
 
+Fast path (from repo root):
+
+```bash
+scripts/run_pilot_test.sh --mode quick
+```
+
+For broader coverage:
+
+```bash
+scripts/run_pilot_test.sh --mode full
+```
+
 ## 1. Preconditions
 
 - Authorized target list approved.

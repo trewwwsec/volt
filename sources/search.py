@@ -165,9 +165,7 @@ def fetch_commoncrawl_results(
     status, body, _ = fetch_url(filtered_url, timeout=timeout)
     query_url = filtered_url
     if status in {400, 422}:
-        query_url = (
-            f"{index_endpoint}?url={quote_plus(pattern)}&output=json&fl=url&limit={limit}"
-        )
+        query_url = f"{index_endpoint}?url={quote_plus(pattern)}&output=json&fl=url&limit={limit}"
         status, body, _ = fetch_url(query_url, timeout=timeout)
     if status != 200 or not body:
         return status, [], query_url

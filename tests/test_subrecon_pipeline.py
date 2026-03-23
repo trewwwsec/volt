@@ -545,9 +545,7 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(findings, [])
         self.assertEqual(health["status"], "error")
         self.assertEqual(health["providers"]["bing"]["status"], "error")
-        self.assertEqual(
-            health.get("error_types", {}).get("bing_challenge_page"), 5
-        )
+        self.assertEqual(health.get("error_types", {}).get("bing_challenge_page"), 5)
 
     @patch("subrecon.fetch_url")
     def test_collect_search_index_findings_commoncrawl_fallback_challenge_is_error(
@@ -587,9 +585,7 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(
             health.get("error_types", {}).get("commoncrawl_index_unavailable"), 1
         )
-        self.assertEqual(
-            health.get("error_types", {}).get("bing_challenge_page"), 5
-        )
+        self.assertEqual(health.get("error_types", {}).get("bing_challenge_page"), 5)
 
     @patch("subrecon.run_command")
     @patch("subrecon.check_tool")

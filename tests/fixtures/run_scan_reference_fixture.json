@@ -1,0 +1,183 @@
+{
+  "generated_at": "2026-03-22T00:00:00+00:00",
+  "mode": "passive_osint",
+  "targets": [
+    "example.com"
+  ],
+  "organization": null,
+  "legal": {
+    "active_scanning_performed": false,
+    "notes": [
+      "No direct port scanning or exploitation performed.",
+      "Search/index signals require validation in an authorized workflow.",
+      "Takeover checks use DNS-over-HTTPS CNAME resolution and passive HTTP fingerprinting.",
+      "GCP checks use bucket endpoint HEAD/GET requests only (no object retrieval).",
+      "Azure Blob checks use anonymous list probes only (no blob/object retrieval).",
+      "S3 checks use HEAD requests and optional anonymous ListObjectsV2 probes with max-keys=0 (no object retrieval)."
+    ]
+  },
+  "inventory": {
+    "discovered_hosts": [
+      "a.example.com"
+    ]
+  },
+  "source_health": {
+    "subfinder": {
+      "name": "subfinder",
+      "enabled": false,
+      "status": "disabled",
+      "queried": 0,
+      "hosts": 0,
+      "findings": 0,
+      "errors": 0,
+      "timeouts": 0,
+      "error_types": {},
+      "error_samples": [],
+      "notes": []
+    },
+    "amass": {
+      "name": "amass",
+      "enabled": false,
+      "status": "disabled",
+      "queried": 0,
+      "hosts": 0,
+      "findings": 0,
+      "errors": 0,
+      "timeouts": 0,
+      "error_types": {},
+      "error_samples": [],
+      "notes": []
+    },
+    "ct": {
+      "name": "crt.sh",
+      "enabled": true,
+      "status": "ok",
+      "queried": 1,
+      "hosts": 1,
+      "findings": 1,
+      "errors": 0,
+      "timeouts": 0,
+      "error_types": {},
+      "error_samples": [],
+      "notes": []
+    },
+    "search": {
+      "name": "search",
+      "enabled": false,
+      "status": "disabled",
+      "queried": 0,
+      "hosts": 0,
+      "findings": 0,
+      "errors": 0,
+      "timeouts": 0,
+      "error_types": {},
+      "error_samples": [],
+      "notes": []
+    },
+    "s3": {
+      "name": "s3",
+      "enabled": true,
+      "status": "ok",
+      "queried": 1,
+      "hosts": 1,
+      "findings": 1,
+      "errors": 0,
+      "timeouts": 0,
+      "error_types": {},
+      "error_samples": [],
+      "notes": []
+    },
+    "gcp": {
+      "name": "gcp",
+      "enabled": false,
+      "status": "disabled",
+      "queried": 0,
+      "hosts": 0,
+      "findings": 0,
+      "errors": 0,
+      "timeouts": 0,
+      "error_types": {},
+      "error_samples": [],
+      "notes": []
+    },
+    "azure": {
+      "name": "azure",
+      "enabled": false,
+      "status": "disabled",
+      "queried": 0,
+      "hosts": 0,
+      "findings": 0,
+      "errors": 0,
+      "timeouts": 0,
+      "error_types": {},
+      "error_samples": [],
+      "notes": []
+    },
+    "takeover": {
+      "name": "takeover",
+      "enabled": false,
+      "status": "disabled",
+      "queried": 0,
+      "hosts": 0,
+      "findings": 0,
+      "errors": 0,
+      "timeouts": 0,
+      "error_types": {},
+      "error_samples": [],
+      "notes": []
+    }
+  },
+  "summary": {
+    "total_findings": 2,
+    "by_type": {
+      "s3_bucket": 1,
+      "subdomain": 1
+    },
+    "by_severity": {
+      "info": 1,
+      "medium": 1
+    }
+  },
+  "findings": [
+    {
+      "asset_type": "s3_bucket",
+      "asset": "example-assets",
+      "severity": "medium",
+      "confidence": "high",
+      "title": "Potentially public S3 bucket",
+      "description": "Bucket endpoint returned HTTP 200.",
+      "source": "aws-s3-head",
+      "tags": [
+        "cloud",
+        "s3",
+        "passive"
+      ],
+      "evidence": [
+        {
+          "source_url": "https://example-assets.s3.amazonaws.com/",
+          "note": "HEAD status=200. existence=confirmed_exists."
+        }
+      ]
+    },
+    {
+      "asset_type": "subdomain",
+      "asset": "a.example.com",
+      "severity": "info",
+      "confidence": "high",
+      "title": "Subdomain discovered via CT logs",
+      "description": "Observed in Certificate Transparency records.",
+      "source": "crt.sh",
+      "tags": [
+        "passive",
+        "ct"
+      ],
+      "evidence": [
+        {
+          "source_url": "https://crt.sh/?q=a.example.com",
+          "note": "Matched CT entry."
+        }
+      ]
+    }
+  ]
+}
+

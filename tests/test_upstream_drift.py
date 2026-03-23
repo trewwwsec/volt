@@ -91,11 +91,13 @@ class UpstreamDriftReliabilityTest(unittest.TestCase):
             health.get("error_types", {}).get("commoncrawl_query_exception", 0), 0
         )
 
+    @patch("subrecon.fetch_url")
     @patch("subrecon.fetch_commoncrawl_index_endpoint")
     def test_collect_search_index_findings_handles_commoncrawl_index_exception(
-        self, mock_fetch_index
+        self, mock_fetch_index, mock_fetch_url
     ) -> None:
         mock_fetch_index.side_effect = RuntimeError("index service unavailable")
+        mock_fetch_url.return_value = (500, "", {})
         health = subrecon.init_source_health("search")
         hosts, findings = subrecon.collect_search_index_findings(
             self._context(["commoncrawl"]), health

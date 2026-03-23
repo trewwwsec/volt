@@ -199,8 +199,10 @@ def collect_search_index_findings(
         provider: {"queries": 0, "errors": 0, "results": 0, "status": "ok", "notes": []}
         for provider in context.search_providers
     }
+    search_fallback_coverage = False
 
     commoncrawl_index = None
+    enable_bing_fallback = False
     if "commoncrawl" in context.search_providers:
         index_exception = False
         try:
@@ -226,9 +228,31 @@ def collect_search_index_findings(
                 else "commoncrawl_index_unavailable",
                 detail=index_note,
             )
+            if "bing" not in context.search_providers:
+                enable_bing_fallback = True
+                provider_stats.setdefault(
+                    "bing",
+                    {
+                        "queries": 0,
+                        "errors": 0,
+                        "results": 0,
+                        "status": "ok",
+                        "notes": [],
+                    },
+                )
+                fallback_note = (
+                    "fallback enabled: executing Bing dorks because "
+                    "Common Crawl index endpoint is unavailable"
+                )
+                provider_stats["bing"]["notes"].append(fallback_note)
+                stats["notes"].append(fallback_note)
+                log(
+                    "[search] provider=commoncrawl unavailable; using bing fallback",
+                    context.verbose,
+                )
 
     for domain in context.domains:
-        if "bing" in context.search_providers:
+        if "bing" in context.search_providers or enable_bing_fallback:
             for query, category in build_dork_queries(domain):
                 provider_stats["bing"]["queries"] += 1
                 stats["queried"] += 1
@@ -270,6 +294,7 @@ def collect_search_index_findings(
                     )
                     continue
                 provider_stats["bing"]["results"] += len(results)
+                search_fallback_coverage = True
                 log(
                     f"[search] provider=bing {domain} query='{category}' results={len(results)}",
                     context.verbose,
@@ -399,7 +424,9 @@ def collect_search_index_findings(
     stats["hosts"] = len(discovered_hosts)
     stats["findings"] = len(findings)
     if stats["errors"]:
-        stats["status"] = "partial" if findings else "error"
+        stats["status"] = (
+            "partial" if (findings or search_fallback_coverage) else "error"
+        )
     elif findings:
         stats["status"] = "ok"
     else:

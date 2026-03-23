@@ -425,6 +425,45 @@ class SubreconPipelineTest(unittest.TestCase):
         self.assertEqual(health["providers"]["commoncrawl"]["status"], "error")
 
     @patch("subrecon.fetch_url")
+    def test_collect_search_index_findings_commoncrawl_index_failure_uses_bing_fallback(
+        self, mock_fetch_url
+    ) -> None:
+        def fake_fetch(
+            url: str,
+            timeout: int,
+            method: str = "GET",
+            headers: Optional[dict[str, str]] = None,
+            retries: int = 0,
+        ) -> tuple[int, str, dict[str, str]]:
+            del timeout, method, headers, retries
+            if "index.commoncrawl.org/collinfo.json" in url:
+                return (0, "", {})
+            if "www.bing.com/search" in url:
+                return (
+                    200,
+                    '<li class="b_algo"><h2><a href="https://a.example.com/.env">A</a></h2><p>dotenv</p></li>',
+                    {},
+                )
+            return (0, "", {})
+
+        mock_fetch_url.side_effect = fake_fetch
+        ctx = self._default_context()
+        ctx.search_providers = ["commoncrawl"]
+        health = subrecon.init_source_health("search")
+        hosts, findings = subrecon.collect_search_index_findings(ctx, health)
+        self.assertIn("a.example.com", hosts)
+        self.assertTrue(any(f.source == "bing" for f in findings))
+        self.assertEqual(health["status"], "partial")
+        self.assertEqual(health["providers"]["commoncrawl"]["status"], "error")
+        self.assertEqual(health["providers"]["bing"]["status"], "ok")
+        self.assertTrue(
+            any(
+                "fallback enabled: executing Bing dorks" in note
+                for note in health["notes"]
+            )
+        )
+
+    @patch("subrecon.fetch_url")
     def test_collect_search_index_findings_bing_no_results_sets_ok_no_results(
         self, mock_fetch_url
     ) -> None:

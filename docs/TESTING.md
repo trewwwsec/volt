@@ -10,7 +10,7 @@ Run all tests:
 uv run python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Current baseline (March 22, 2026): `107` tests passing.
+Current baseline (March 22, 2026): `108` tests passing.
 
 CI gate:
 
@@ -31,6 +31,7 @@ Current suite covers:
 - Subfinder/amass structured provenance parsing and confidence scoring
 - Amass compatibility fallback paths (`-src` -> no-`-src`, `-json` -> plain-output parsing)
 - Bing and Common Crawl search parsing paths and leak classification
+- Common Crawl index-failure fallback to Bing with degraded (`partial`) source-health semantics
 - CT JSON parsing path
 - S3 `HEAD` + fallback `ListObjectsV2` classification path
 - S3 candidate validation filtering (reserved/invalid names), region-aware probe wiring, optional website probe path, and probe-retry override

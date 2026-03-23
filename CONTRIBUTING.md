@@ -48,3 +48,6 @@ Do not open public issues for sensitive vulnerabilities.
 
 - Follow [SECURITY.md](SECURITY.md) for disclosure guidance.
 
+## Support Path
+
+- General usage and bug support: [SUPPORT.md](SUPPORT.md)

@@ -14,6 +14,7 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 - Release governance docs: `SECURITY.md` and `docs/RELEASE.md`.
 - Contributor workflow doc: `CONTRIBUTING.md`.
 - Customer onboarding docs: `docs/QUICKSTART.md` and `docs/TRIAGE.md`.
+- Project support policy: `SUPPORT.md`.
 
 ### Changed
 

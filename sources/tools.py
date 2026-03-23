@@ -6,6 +6,36 @@ from core import record_source_error
 from models import Evidence, Finding, ScanContext
 
 AMASS_TIMEOUT_GRACE_SECONDS = 30
+AMASS_HEALTHCHECK_TIMEOUT_SECONDS = 5
+
+
+def _probe_amass_health(
+    run_command: Callable[[list[str], int], tuple[int, str, str]],
+) -> tuple[str, str]:
+    probe_commands = (
+        ["amass", "-version"],
+        ["amass", "enum", "-h"],
+    )
+    failures: list[str] = []
+    inconclusive = False
+    for probe_cmd in probe_commands:
+        rc, stdout, stderr = run_command(
+            list(probe_cmd), timeout=AMASS_HEALTHCHECK_TIMEOUT_SECONDS
+        )
+        output = f"{stdout}\n{stderr}".strip()
+        if rc == 124:
+            inconclusive = True
+            continue
+        if output or rc == 0:
+            return "healthy", ""
+        failures.append(f"{' '.join(probe_cmd)} rc={rc} returned no output")
+
+    if failures and not inconclusive:
+        return (
+            "unhealthy",
+            "; ".join(failures[:3]),
+        )
+    return "inconclusive", ""
 
 
 def collect_subfinder_subdomains(
@@ -131,6 +161,20 @@ def collect_amass_subdomains(
         stats["notes"].append("amass not installed")
         return set(), []
 
+    amass_health_state, amass_health_detail = _probe_amass_health(run_command)
+    if amass_health_state == "unhealthy":
+        record_source_error(
+            stats,
+            "amass_tool_unhealthy",
+            detail=amass_health_detail,
+        )
+        stats["status"] = "error"
+        stats["notes"].append(
+            "amass is installed but unresponsive in this environment; skipping amass collection"
+        )
+        print("    [amass] health probe failed; skipping amass collection")
+        return set(), []
+
     hosts: set[str] = set()
     host_sources: dict[str, set[str]] = {}
     structured_domains = 0
@@ -139,6 +183,7 @@ def collect_amass_subdomains(
     json_compat_fallbacks = 0
     timeout_retries = 0
     timeout_exhausted_domains = 0
+    compat_empty_output_domains = 0
     for domain in context.domains:
         stats["queried"] += 1
         amass_timeout_minutes = max(1, (context.tool_timeout + 59) // 60)
@@ -165,8 +210,8 @@ def collect_amass_subdomains(
             "-json",
             "/dev/stdout",
         ]
-        cmd_plain = [*base_cmd]
-        cmd_plain_timeout_retry = [*base_cmd, "-nocolor", "-silent", "-norecursive"]
+        cmd_plain = [*base_cmd, "-nocolor", "-norecursive"]
+        cmd_plain_timeout_retry = [*cmd_plain]
 
         rc, stdout, stderr = run_command(cmd_with_src, timeout=amass_command_timeout)
         used_structured_mode = True
@@ -257,6 +302,15 @@ def collect_amass_subdomains(
                     )
                     if note not in stats["notes"]:
                         stats["notes"].append(note)
+
+            if rc == 0 and not parsed and not used_structured_mode:
+                compat_empty_output_domains += 1
+                note = (
+                    "amass compatibility mode produced no plain output for at least one domain; "
+                    "treat zero-results as degraded coverage and review local amass datasource configuration"
+                )
+                if note not in stats["notes"]:
+                    stats["notes"].append(note)
         hosts.update(parsed)
 
         if rc != 0 and not parsed:
@@ -310,8 +364,11 @@ def collect_amass_subdomains(
     stats["json_compat_fallbacks"] = json_compat_fallbacks
     stats["timeout_retries"] = timeout_retries
     stats["timeout_exhausted_domains"] = timeout_exhausted_domains
+    stats["compat_empty_output_domains"] = compat_empty_output_domains
     if not hosts and not stats["timeouts"] and not stats["errors"] and stats["queried"]:
-        stats["status"] = "ok_no_results"
+        stats["status"] = (
+            "partial" if compat_empty_output_domains > 0 else "ok_no_results"
+        )
     if stats["timeouts"] or stats["errors"]:
         if not hosts and stats["timeouts"] and not stats["errors"]:
             stats["status"] = "partial"

@@ -397,7 +397,9 @@ class VoltPipelineTest(unittest.TestCase):
     def test_collect_search_index_findings_filters_to_target_domain(
         self, mock_fetch_index, mock_fetch_results
     ) -> None:
-        mock_fetch_index.return_value = "https://index.commoncrawl.org/CC-MAIN-2026-10-index"
+        mock_fetch_index.return_value = (
+            "https://index.commoncrawl.org/CC-MAIN-2026-10-index"
+        )
         mock_fetch_results.return_value = (
             200,
             [
@@ -419,14 +421,23 @@ class VoltPipelineTest(unittest.TestCase):
     def test_collect_search_index_findings_commoncrawl_provider(
         self, mock_fetch_index, mock_fetch_results
     ) -> None:
-        mock_fetch_index.return_value = "https://index.commoncrawl.org/CC-MAIN-2026-10-index"
+        mock_fetch_index.return_value = (
+            "https://index.commoncrawl.org/CC-MAIN-2026-10-index"
+        )
         mock_fetch_results.side_effect = [
             (
                 200,
                 [{"url": "https://a.example.com/.env", "title": "", "snippet": ""}],
                 "https://index.commoncrawl.org/CC-MAIN-2026-10-index?url=dotenv",
             ),
-            *[(500, [], "https://index.commoncrawl.org/CC-MAIN-2026-10-index?url=other") for _ in range(11)],
+            *[
+                (
+                    500,
+                    [],
+                    "https://index.commoncrawl.org/CC-MAIN-2026-10-index?url=other",
+                )
+                for _ in range(11)
+            ],
         ]
         ctx = self._default_context()
         ctx.search_providers = ["commoncrawl"]
@@ -467,15 +478,28 @@ class VoltPipelineTest(unittest.TestCase):
     def test_collect_search_index_findings_commoncrawl_404_is_not_error(
         self, mock_fetch_index, mock_fetch_results
     ) -> None:
-        mock_fetch_index.return_value = "https://index.commoncrawl.org/CC-MAIN-2026-10-index"
+        mock_fetch_index.return_value = (
+            "https://index.commoncrawl.org/CC-MAIN-2026-10-index"
+        )
         mock_fetch_results.side_effect = [
             (
                 200,
                 [{"url": "https://a.example.com/.env", "title": "", "snippet": ""}],
                 "https://index.commoncrawl.org/CC-MAIN-2026-10-index?url=dotenv",
             ),
-            (404, [], "https://index.commoncrawl.org/CC-MAIN-2026-10-index?url=dotenv2"),
-            *[(200, [], "https://index.commoncrawl.org/CC-MAIN-2026-10-index?url=other") for _ in range(10)],
+            (
+                404,
+                [],
+                "https://index.commoncrawl.org/CC-MAIN-2026-10-index?url=dotenv2",
+            ),
+            *[
+                (
+                    200,
+                    [],
+                    "https://index.commoncrawl.org/CC-MAIN-2026-10-index?url=other",
+                )
+                for _ in range(10)
+            ],
         ]
         ctx = self._default_context()
         ctx.search_providers = ["commoncrawl"]
@@ -560,9 +584,7 @@ class VoltPipelineTest(unittest.TestCase):
             (0, json.dumps([{"name": "a.example.com"}]), ""),
         ]
         health = volt.init_source_health("amass")
-        hosts, findings = volt.collect_amass_subdomains(
-            self._default_context(), health
-        )
+        hosts, findings = volt.collect_amass_subdomains(self._default_context(), health)
         self.assertEqual(hosts, {"a.example.com"})
         self.assertEqual(len(findings), 1)
         self.assertEqual(mock_run_command.call_count, 3)
@@ -589,9 +611,7 @@ class VoltPipelineTest(unittest.TestCase):
             (0, "a.example.com\nevil.com\n", ""),
         ]
         health = volt.init_source_health("amass")
-        hosts, findings = volt.collect_amass_subdomains(
-            self._default_context(), health
-        )
+        hosts, findings = volt.collect_amass_subdomains(self._default_context(), health)
         self.assertEqual(hosts, {"a.example.com"})
         self.assertEqual(len(findings), 1)
         self.assertEqual(mock_run_command.call_count, 4)
@@ -624,9 +644,7 @@ class VoltPipelineTest(unittest.TestCase):
             (124, "", ""),
         ]
         health = volt.init_source_health("amass")
-        hosts, findings = volt.collect_amass_subdomains(
-            self._default_context(), health
-        )
+        hosts, findings = volt.collect_amass_subdomains(self._default_context(), health)
         self.assertEqual(hosts, set())
         self.assertEqual(findings, [])
         self.assertEqual(mock_run_command.call_count, 5)
@@ -655,9 +673,7 @@ class VoltPipelineTest(unittest.TestCase):
             (0, "", ""),
         ]
         health = volt.init_source_health("amass")
-        hosts, findings = volt.collect_amass_subdomains(
-            self._default_context(), health
-        )
+        hosts, findings = volt.collect_amass_subdomains(self._default_context(), health)
         self.assertEqual(hosts, set())
         self.assertEqual(findings, [])
         self.assertEqual(health.get("timeouts"), 0)
@@ -683,9 +699,7 @@ class VoltPipelineTest(unittest.TestCase):
             (1, "", ""),
         ]
         health = volt.init_source_health("amass")
-        hosts, findings = volt.collect_amass_subdomains(
-            self._default_context(), health
-        )
+        hosts, findings = volt.collect_amass_subdomains(self._default_context(), health)
         self.assertEqual(hosts, set())
         self.assertEqual(findings, [])
         self.assertEqual(health.get("queried"), 0)
@@ -723,9 +737,7 @@ class VoltPipelineTest(unittest.TestCase):
             (0, "a.example.com\n", ""),
         ]
         health = volt.init_source_health("amass")
-        hosts, findings = volt.collect_amass_subdomains(
-            self._default_context(), health
-        )
+        hosts, findings = volt.collect_amass_subdomains(self._default_context(), health)
         self.assertEqual(hosts, {"a.example.com"})
         self.assertEqual(len(findings), 1)
         self.assertEqual(health.get("status"), "ok")
@@ -789,9 +801,7 @@ class VoltPipelineTest(unittest.TestCase):
         self.assertEqual(volt.classify_gcp_status(200), "confirmed_exists")
         self.assertEqual(volt.classify_gcp_status(403), "likely_exists")
         self.assertEqual(volt.classify_gcp_status(404), "unknown")
-        self.assertEqual(
-            volt.classify_gcp_status(404, "NoSuchBucket"), "not_exists"
-        )
+        self.assertEqual(volt.classify_gcp_status(404, "NoSuchBucket"), "not_exists")
 
     def test_classify_azure_blob_status(self) -> None:
         self.assertEqual(
@@ -1204,9 +1214,7 @@ class VoltPipelineTest(unittest.TestCase):
         ctx = self._default_context()
         ctx.keywords = ["example"]
         health = volt.init_source_health("azure")
-        findings = volt.collect_azure_blob_findings(
-            ctx, {"app.example.com"}, health
-        )
+        findings = volt.collect_azure_blob_findings(ctx, {"app.example.com"}, health)
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].asset_type, "azure_blob_container")
         self.assertEqual(findings[0].asset, "acmestorage/example")
@@ -1256,9 +1264,7 @@ class VoltPipelineTest(unittest.TestCase):
         ctx.keywords = []
         ctx.max_bucket_candidates = 20
         health = volt.init_source_health("azure")
-        findings = volt.collect_azure_blob_findings(
-            ctx, {"app.example.com"}, health
-        )
+        findings = volt.collect_azure_blob_findings(ctx, {"app.example.com"}, health)
         self.assertTrue(any(f.asset == "acmestorage/$web" for f in findings))
         self.assertGreater(health.get("system_container_hits", 0), 0)
 
@@ -1364,9 +1370,7 @@ class VoltPipelineTest(unittest.TestCase):
         ctx.keywords = []
         ctx.max_bucket_candidates = 3
         health = volt.init_source_health("azure")
-        findings = volt.collect_azure_blob_findings(
-            ctx, {"app.example.com"}, health
-        )
+        findings = volt.collect_azure_blob_findings(ctx, {"app.example.com"}, health)
         self.assertEqual(findings, [])
         self.assertEqual(health.get("likely_exists"), 1)
         self.assertEqual(health.get("not_exists"), 1)
@@ -1441,9 +1445,7 @@ class VoltPipelineTest(unittest.TestCase):
         ctx.max_bucket_candidates = 40
         ctx.azure_blob_object_probe = True
         health = volt.init_source_health("azure")
-        findings = volt.collect_azure_blob_findings(
-            ctx, {"app.example.com"}, health
-        )
+        findings = volt.collect_azure_blob_findings(ctx, {"app.example.com"}, health)
         self.assertTrue(any(f.asset == "acmestorage/example" for f in findings))
         self.assertGreater(health.get("blob_only_hits", 0), 0)
         self.assertGreater(health.get("blob_object_probes", 0), 0)
@@ -1459,9 +1461,7 @@ class VoltPipelineTest(unittest.TestCase):
         )
         ctx = self._default_context()
         health = volt.init_source_health("azure")
-        findings = volt.collect_azure_blob_findings(
-            ctx, {"app.example.com"}, health
-        )
+        findings = volt.collect_azure_blob_findings(ctx, {"app.example.com"}, health)
         self.assertEqual(findings, [])
         self.assertEqual(health["errors"], 1)
         self.assertEqual(health["status"], "partial")
@@ -1488,9 +1488,7 @@ class VoltPipelineTest(unittest.TestCase):
         self.assertEqual(region, "")
         self.assertEqual(list_status, 200)
         head_call = mock_fetch_url.call_args_list[0]
-        self.assertEqual(
-            head_call.kwargs.get("retries"), volt.CLOUD_PROBE_HTTP_RETRIES
-        )
+        self.assertEqual(head_call.kwargs.get("retries"), volt.CLOUD_PROBE_HTTP_RETRIES)
 
     @patch("volt.fetch_url")
     def test_check_single_bucket_exists_defaults_to_list_probe(

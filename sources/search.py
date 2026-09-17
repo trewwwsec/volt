@@ -7,6 +7,7 @@ from urllib import parse
 from core import record_source_error
 from models import Evidence, Finding, ScanContext
 
+
 def build_commoncrawl_patterns(domain: str) -> list[tuple[str, str]]:
     return [
         (f"*.{domain}/*.env", "dotenv"),

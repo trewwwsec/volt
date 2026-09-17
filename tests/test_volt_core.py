@@ -5,9 +5,7 @@ import volt
 
 class CoreHelpersTest(unittest.TestCase):
     def test_normalize_domain(self) -> None:
-        self.assertEqual(
-            volt.normalize_domain(" .WWW.Example.COM "), "www.example.com"
-        )
+        self.assertEqual(volt.normalize_domain(" .WWW.Example.COM "), "www.example.com")
 
     def test_parse_keywords(self) -> None:
         self.assertEqual(

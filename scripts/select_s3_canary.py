@@ -86,14 +86,12 @@ def main() -> int:
     candidates = parse_candidates(args.candidates)
     probes: list[dict[str, Any]] = []
     for bucket in candidates:
-        _bucket, status, existence, region, list_status = (
-            check_single_bucket_exists(
-                bucket,
-                args.timeout,
-                True,
-                True,
-                0,
-            )
+        _bucket, status, existence, region, list_status = check_single_bucket_exists(
+            bucket,
+            args.timeout,
+            True,
+            True,
+            0,
         )
         probes.append(
             {

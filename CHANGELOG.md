@@ -10,7 +10,7 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 
 - Packaging metadata and installable `volt` CLI entry point for `uv tool install` and `pipx install`.
 - `--version` CLI flag and centralized version source-of-truth via `volt_version.py`.
-- Non-blocking scheduled/manual live-smoke GitHub Actions workflow (`.github/workflows/live-smoke.yml`).
+- Offline installed-CLI smoke gate: CI builds a wheel, installs it non-editably, and validates the installed `volt` against the offline report contract (`scripts/validation_smoke.py`).
 - Public release governance docs: `SECURITY.md` and `docs/RELEASE.md`.
 - Contributor workflow doc: `CONTRIBUTING.md`.
 - Public onboarding docs: `docs/QUICKSTART.md` and `docs/TRIAGE.md`.
@@ -34,6 +34,8 @@ The format is based on Keep a Changelog, and this project follows semantic versi
 - Degraded `source_health` states (`partial`/`error`) now add deterministic `operator_action` notes and emit a concise terminal reliability warning block.
 - Added deterministic run-scan report fixture coverage to catch schema/output drift in CI.
 - Hardened CT/search collectors against upstream schema/parser drift by handling malformed JSON shapes and provider helper exceptions without crashing.
+- Compile coverage now runs through `scripts/check_compile.py`, which fails explicitly on missing compile targets (replacing stale `subrecon*` filenames that `compileall` silently passed).
+- Removed the uncontrolled scheduled/manual live-smoke workflow (`.github/workflows/live-smoke.yml`); automated live checks are suspended pending explicitly controlled fixtures and a reviewed contact boundary.
 
 ## [0.1.0] - 2026-03-22
 

@@ -32,7 +32,9 @@ python scripts/check_compile.py
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Optional live checks are documented in [docs/TESTING.md](docs/TESTING.md).
+Automated live checks are suspended; the offline installed-package smoke in
+[docs/TESTING.md](docs/TESTING.md) is the required validation gate. See the
+suspended-live policy there before running any manual live commands.
 
 ## Pull Request Guidelines
 

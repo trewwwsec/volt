@@ -13,9 +13,35 @@ python scripts/check_compile.py
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Current baseline: `112` tests passing.
+Current baseline: `112` tests passing plus `tests/test_validation_smoke.py` (offline smoke-gate regression coverage).
 
 If `uv run` is unavailable in a local environment, use direct `python -m ...` commands for deterministic verification.
+
+## Installed Offline CLI Smoke
+
+The required CI smoke gate builds a wheel, installs it non-editably into a clean
+environment, and runs the installed `volt` console entry point outside the
+checkout with all eight sources disabled:
+
+```bash
+WORK="$(mktemp -d)"
+uv build --wheel --out-dir "$WORK/wheel"
+uv venv --python "$(command -v python3)" "$WORK/installed"
+uv pip install --python "$WORK/installed/bin/python" --no-deps "$WORK"/wheel/*.whl
+"$WORK/installed/bin/python" scripts/validation_smoke.py \
+  --executable "$WORK/installed/bin/volt" --output-dir "$WORK/artifacts"
+```
+
+The runner validates the produced report against the offline contract: target
+`example.test`, zero findings, empty inventory, and every source reported as
+`disabled`. It distinguishes command outcome (`command_status`), report validity
+(`report_status`), and source health (`source_status`); a nonzero exit, timeout,
+missing report, malformed report, unknown health status, or degraded source
+fails the gate (exit 1) or reports degradation (exit 2) instead of being
+relabeled a success. `stdout.log`, `stderr.log`, the report, and
+`summary.json` are retained in the output directory. This checks installation
+and report generation only — the report is an empty offline fixture, not a live
+negative result, and says nothing about upstream source availability.
 
 CI gate:
 

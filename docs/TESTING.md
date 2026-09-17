@@ -9,13 +9,39 @@ Primary commands:
 ```bash
 uv run ruff check .
 uv run ruff format --check .
-python -m compileall -q volt.py cli.py constants.py core.py models.py networking.py parsing.py reporting.py volt_models.py volt_reporting.py sources tests
+python scripts/check_compile.py
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Current baseline: `112` tests passing.
+Current baseline: `112` tests passing plus `tests/test_validation_smoke.py` (offline smoke-gate regression coverage).
 
 If `uv run` is unavailable in a local environment, use direct `python -m ...` commands for deterministic verification.
+
+## Installed Offline CLI Smoke
+
+The required CI smoke gate builds a wheel, installs it non-editably into a clean
+environment, and runs the installed `volt` console entry point outside the
+checkout with all eight sources disabled:
+
+```bash
+WORK="$(mktemp -d)"
+uv build --wheel --out-dir "$WORK/wheel"
+uv venv --python "$(command -v python3)" "$WORK/installed"
+uv pip install --python "$WORK/installed/bin/python" --no-deps "$WORK"/wheel/*.whl
+"$WORK/installed/bin/python" scripts/validation_smoke.py \
+  --executable "$WORK/installed/bin/volt" --output-dir "$WORK/artifacts"
+```
+
+The runner validates the produced report against the offline contract: target
+`example.test`, zero findings, empty inventory, and every source reported as
+`disabled`. It distinguishes command outcome (`command_status`), report validity
+(`report_status`), and source health (`source_status`); a nonzero exit, timeout,
+missing report, malformed report, unknown health status, or degraded source
+fails the gate (exit 1) or reports degradation (exit 2) instead of being
+relabeled a success. `stdout.log`, `stderr.log`, the report, and
+`summary.json` are retained in the output directory. This checks installation
+and report generation only — the report is an empty offline fixture, not a live
+negative result, and says nothing about upstream source availability.
 
 CI gate:
 
@@ -23,9 +49,9 @@ CI gate:
 - Trigger: `push` and `pull_request`
 - Lint: `uv run ruff check .`
 - Format check: `uv run ruff format --check .`
-- Static check: `python -m compileall -q volt.py cli.py constants.py core.py models.py networking.py parsing.py reporting.py volt_models.py volt_reporting.py sources tests`
+- Static check: `python scripts/check_compile.py`
 - Test command: `python -m unittest discover -s tests -p "test_*.py"`
-- Separate non-blocking live smoke workflow: `.github/workflows/live-smoke.yml` (`schedule` + `workflow_dispatch`)
+- Smoke gate: builds and installs `volt` non-editably, then runs `scripts/validation_smoke.py` against the installed CLI with all sources disabled (see Installed Offline CLI Smoke above)
 
 Current suite covers:
 
@@ -75,9 +101,22 @@ python -m unittest tests.test_volt_pipeline.VoltPipelineTest.test_collect_subdom
 python -m unittest tests.test_volt_pipeline.VoltPipelineTest.test_collect_amass_subdomains_marks_error_when_tool_unhealthy
 ```
 
-## Live Smoke Checks (Optional)
+## Live Smoke Checks (Suspended)
 
-These rely on network and external source availability. Treat them as smoke validation, not merge gates.
+Automated live smoke checks are suspended. The required CI smoke gate builds and
+installs `volt` non-editably, then runs the installed command outside the
+checkout with all eight sources disabled. This checks installation and report
+generation, not upstream availability or absence of exposure.
+
+Restoring live automation requires explicitly controlled fixtures and a
+reviewed contact boundary covering every enabled collector, generated storage
+candidate, discovered host, redirect, and external tool. A public dataset, a
+substituted root domain, or a low candidate limit does not establish control.
+No live matrix is enabled by this validation repair.
+
+The manual pilot scripts and historical examples below are not approved CI
+fixtures and must not be run as part of the deterministic gate. Historical
+results are evidence of past runs, not authorization for new probes.
 
 One-command harness:
 
@@ -116,7 +155,7 @@ uv run volt -d example.com --no-ct --no-amass --no-search --no-s3 --no-gcp --no-
 uv run volt -d example.com --no-ct --no-subfinder --no-search --no-s3 --no-gcp --no-azure --no-takeover -o /tmp/volt_amass_smoke.json
 ```
 
-### Historical Smoke Snapshot
+### Historical Smoke Snapshot (Legacy Record — Not an Endorsement)
 
 Environment: local macOS runner, passive internet-reachable execution.
 Reference bundle: `/tmp/volt-pilot-20260322-225939` (quick mode).
@@ -126,9 +165,10 @@ Reference bundle: `/tmp/volt-pilot-20260322-225939` (quick mode).
 - GCS-only (`gcs_only_landsat.json`): `source_health.gcp=ok`, `summary.total_findings=2`
 - Azure direct probe (`azure_probe_default.txt` + `azure_probe_retry1.txt`): `status=200`, `existence=confirmed_public` on `azureopendatastorage/nyctlc`
 
-## Rigorous Live Matrix (Bounded E2E)
+## Rigorous Live Matrix (Legacy/Manual Example — Suspended)
 
-Use this matrix for a higher-confidence live validation while keeping runtime bounded.
+The matrix below is a historical example only. It is not an approved fixture set
+and must not be run as part of the deterministic gate.
 
 ```bash
 # Core end-to-end path (all passive HTTP sources + takeover, no external tools)

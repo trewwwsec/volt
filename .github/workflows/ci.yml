@@ -31,10 +31,27 @@ jobs:
         run: uv run ruff format --check .
 
       - name: Static compile check
-        run: >
-          uv run python -m compileall -q
-          subrecon.py cli.py constants.py core.py models.py networking.py parsing.py
-          reporting.py subrecon_models.py subrecon_reporting.py sources tests
+        run: uv run python scripts/check_compile.py
 
       - name: Run unit tests
         run: uv run python -m unittest discover -s tests -p "test_*.py"
+
+      - name: Build and install wheel in clean environment
+        run: |
+          uv build --wheel --out-dir "$RUNNER_TEMP/volt-wheel"
+          uv venv --python "$(command -v python)" "$RUNNER_TEMP/volt-installed"
+          uv pip install --python "$RUNNER_TEMP/volt-installed/bin/python" --no-deps "$RUNNER_TEMP"/volt-wheel/*.whl
+
+      - name: Smoke test installed CLI offline
+        run: >
+          "$RUNNER_TEMP/volt-installed/bin/python" scripts/validation_smoke.py
+          --executable "$RUNNER_TEMP/volt-installed/bin/volt"
+          --output-dir "$RUNNER_TEMP/volt-validation"
+
+      - name: Upload offline validation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-validation-${{ github.run_id }}
+          path: ${{ runner.temp }}/volt-validation
+          if-no-files-found: warn

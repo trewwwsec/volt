@@ -9,16 +9,16 @@ Run deterministic gates:
 ```bash
 uv run ruff check .
 uv run ruff format --check .
-python -m compileall -q volt.py cli.py constants.py core.py models.py networking.py parsing.py reporting.py volt_models.py volt_reporting.py sources tests
+python scripts/check_compile.py
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
 If `uv run` is not usable in the local environment, direct `python -m ...` validation is acceptable for release preparation as long as the results are captured.
 
-Run bounded live smoke (non-blocking quality signal):
-
-- Trigger `.github/workflows/live-smoke.yml` manually, or
-- Run the matrix in `docs/TESTING.md` locally with bounded targets.
+Offline validation is required (the deterministic gates above plus the offline
+installed-CLI smoke in `docs/TESTING.md`). Automated live smoke is suspended;
+do not run live matrix commands as part of release validation until controlled
+fixtures and a reviewed contact boundary are defined.
 
 ## 2. Package Installability Checks
 
@@ -56,5 +56,5 @@ Tag sequence:
 ## 5. Post-Release
 
 1. Add next-cycle `Unreleased` section in `CHANGELOG.md`.
-2. Track any live-smoke drift findings as follow-up issues.
+2. Track offline-gate failures and any controlled-fixture design work as follow-up issues.
 3. Capture any public launch feedback as issues or roadmap updates.

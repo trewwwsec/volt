@@ -31,10 +31,7 @@ jobs:
         run: uv run ruff format --check .
 
       - name: Static compile check
-        run: >
-          uv run python -m compileall -q
-          subrecon.py cli.py constants.py core.py models.py networking.py parsing.py
-          reporting.py subrecon_models.py subrecon_reporting.py sources tests
+        run: uv run python scripts/check_compile.py
 
       - name: Run unit tests
         run: uv run python -m unittest discover -s tests -p "test_*.py"

@@ -9,7 +9,7 @@ Primary commands:
 ```bash
 uv run ruff check .
 uv run ruff format --check .
-python -m compileall -q volt.py cli.py constants.py core.py models.py networking.py parsing.py reporting.py volt_models.py volt_reporting.py sources tests
+python scripts/check_compile.py
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
@@ -23,7 +23,7 @@ CI gate:
 - Trigger: `push` and `pull_request`
 - Lint: `uv run ruff check .`
 - Format check: `uv run ruff format --check .`
-- Static check: `python -m compileall -q volt.py cli.py constants.py core.py models.py networking.py parsing.py reporting.py volt_models.py volt_reporting.py sources tests`
+- Static check: `python scripts/check_compile.py`
 - Test command: `python -m unittest discover -s tests -p "test_*.py"`
 - Separate non-blocking live smoke workflow: `.github/workflows/live-smoke.yml` (`schedule` + `workflow_dispatch`)
 
